@@ -44,4 +44,22 @@ app.*.map.json
 /android/app/profile
 /android/app/release
 
-endpoints.json 
+# Documentação interna da API (não versionar)
+endpoints.json
+
+# Segredos e configuração local — NUNCA versionar
+*.env
+.env*
+*.jks
+*.keystore
+**/android/key.properties
+**/android/local.properties
+
+# Relatórios de crash do Flutter
+flutter_*.log
+
+# Artefatos de plataforma gerados
+**/windows/flutter/ephemeral/
+**/linux/flutter/ephemeral/
+**/macos/Flutter/ephemeral/
+**/ios/Flutter/ephemeral/
