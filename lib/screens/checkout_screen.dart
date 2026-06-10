@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/cart.dart';
+import '../models/address.dart';
 import '../services/api_service.dart';
 
 class CheckoutScreen extends StatefulWidget {
@@ -31,6 +32,10 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
   bool _isLoading = false;
   double _freightValue = 15.00;
 
+  List<Address> _savedAddresses = [];
+  String? _selectedAddressId;
+  bool _saveAddress = false;
+
   @override
   void initState() {
     super.initState();
@@ -45,6 +50,31 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
       _emailController.text = prefs.getString('user_email') ?? '';
       _cpfController.text = prefs.getString('user_cpf') ?? '';
       _telefoneController.text = prefs.getString('user_telefone') ?? '';
+    });
+    if (_userId != null && _userId!.isNotEmpty) {
+      final addresses = await _apiService.getAddressesByUser(_userId!);
+      if (!mounted) return;
+      setState(() => _savedAddresses = addresses);
+      // Pré-seleciona o endereço principal, se houver
+      for (final addr in addresses) {
+        if (addr.principal) {
+          _applyAddress(addr);
+          break;
+        }
+      }
+    }
+  }
+
+  void _applyAddress(Address addr) {
+    setState(() {
+      _selectedAddressId = addr.id;
+      _cepController.text = addr.cep;
+      _logradouroController.text = addr.logradouro;
+      _numeroController.text = addr.numero;
+      _complementoController.text = addr.complemento;
+      _bairroController.text = addr.bairro;
+      _cidadeController.text = addr.cidade;
+      _ufController.text = addr.estado;
     });
   }
 
@@ -78,6 +108,23 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     setState(() => _isLoading = true);
 
     try {
+      // Salva o endereço digitado na conta do usuário, se solicitado
+      if (_saveAddress && _selectedAddressId == null && _userId != null) {
+        await _apiService.createAddress(
+          _userId!,
+          Address(
+            id: '',
+            logradouro: _logradouroController.text,
+            numero: _numeroController.text,
+            complemento: _complementoController.text,
+            bairro: _bairroController.text,
+            cidade: _cidadeController.text,
+            estado: _ufController.text,
+            cep: _cepController.text,
+          ),
+        );
+      }
+
       // JSON AJUSTADO CONFORME O ERRO 400 DO SEU SPRING BOOT
       final orderData = {
         "usuarioId": _userId, // Adicionado aqui
@@ -186,7 +233,38 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
             const SizedBox(height: 32),
             const Text('Endereço de Entrega', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
             const SizedBox(height: 16),
-            _buildTextField(_cepController, 'CEP', keyboardType: TextInputType.number, onChanged: _searchCep),
+            if (_savedAddresses.isNotEmpty) ...[
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: _savedAddresses.map((addr) {
+                  final selected = addr.id == _selectedAddressId;
+                  return ChoiceChip(
+                    selected: selected,
+                    onSelected: (_) => _applyAddress(addr),
+                    selectedColor: const Color(0xFF007AFF).withOpacity(0.12),
+                    avatar: Icon(
+                      addr.principal ? Icons.star_rounded : Icons.location_on_outlined,
+                      size: 16,
+                      color: const Color(0xFF007AFF),
+                    ),
+                    label: Text(
+                      '${addr.logradouro}, ${addr.numero}',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: selected ? FontWeight.w800 : FontWeight.w500,
+                        color: selected ? const Color(0xFF007AFF) : Colors.black87,
+                      ),
+                    ),
+                  );
+                }).toList(),
+              ),
+              const SizedBox(height: 16),
+            ],
+            _buildTextField(_cepController, 'CEP', keyboardType: TextInputType.number, onChanged: (v) {
+              setState(() => _selectedAddressId = null);
+              _searchCep(v);
+            }),
             const SizedBox(height: 12),
             _buildTextField(_logradouroController, 'Rua / Logradouro'),
             const SizedBox(height: 12),
@@ -207,7 +285,18 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                 Expanded(flex: 1, child: _buildTextField(_ufController, 'UF')),
               ],
             ),
-            
+            if (_selectedAddressId == null)
+              CheckboxListTile(
+                value: _saveAddress,
+                onChanged: (v) => setState(() => _saveAddress = v ?? false),
+                contentPadding: EdgeInsets.zero,
+                controlAffinity: ListTileControlAffinity.leading,
+                title: const Text(
+                  'Salvar este endereço na minha conta',
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                ),
+              ),
+
             const SizedBox(height: 32),
             const Text('Resumo', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
             const SizedBox(height: 16),

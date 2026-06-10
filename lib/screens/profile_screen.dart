@@ -100,7 +100,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
               _buildMenuRow(Icons.favorite_border_rounded, 'Favoritos', () {
                 Navigator.pushNamed(context, '/favorites');
               }),
-              _buildMenuRow(Icons.location_on_outlined, 'Meus Endereços', () {}),
+              _buildMenuRow(Icons.location_on_outlined, 'Meus Endereços', () {
+                Navigator.pushNamed(context, '/addresses');
+              }),
             ]),
 
             const SizedBox(height: 24),

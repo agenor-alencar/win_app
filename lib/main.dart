@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' hide Category;
 import 'package:provider/provider.dart';
+import 'package:device_frame/device_frame.dart';
 import 'models/product.dart';
 import 'models/category.dart';
 import 'models/cart.dart';
@@ -13,6 +15,7 @@ import 'screens/checkout_screen.dart';
 import 'screens/profile_screen.dart';
 import 'screens/orders_screen.dart';
 import 'screens/favorites_screen.dart';
+import 'screens/addresses_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -25,9 +28,42 @@ void main() async {
         ChangeNotifierProvider(create: (_) => Cart()),
         ChangeNotifierProvider(create: (_) => Favorites()),
       ],
-      child: WinMarketplaceApp(initialRoute: isLoggedIn ? '/home' : '/login'),
+      child: PhoneFrameWrapper(
+        child: WinMarketplaceApp(initialRoute: isLoggedIn ? '/home' : '/login'),
+      ),
     ),
   );
+}
+
+/// Wrapper que exibe um frame de celular no desktop para simular aparência mobile.
+class PhoneFrameWrapper extends StatelessWidget {
+  final Widget child;
+  const PhoneFrameWrapper({super.key, required this.child});
+
+  bool get _isDesktop =>
+      defaultTargetPlatform == TargetPlatform.windows ||
+      defaultTargetPlatform == TargetPlatform.linux ||
+      defaultTargetPlatform == TargetPlatform.macOS;
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_isDesktop) return child;
+
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      home: Scaffold(
+        backgroundColor: const Color(0xFF1A1A2E),
+        body: Center(
+          child: DeviceFrame(
+            device: Devices.ios.iPhone13,
+            isFrameVisible: true,
+            orientation: Orientation.portrait,
+            screen: child,
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class WinMarketplaceApp extends StatelessWidget {
@@ -57,6 +93,7 @@ class WinMarketplaceApp extends StatelessWidget {
         '/profile': (context) => const ProfileScreen(),
         '/orders': (context) => const OrdersScreen(),
         '/favorites': (context) => const FavoritesScreen(),
+        '/addresses': (context) => const AddressesScreen(),
       },
     );
   }
