@@ -8,6 +8,7 @@ import 'models/cart.dart';
 import 'models/favorites.dart';
 import 'services/api_service.dart';
 import 'services/auth_service.dart';
+import 'services/auth_guard.dart';
 import 'screens/login_screen.dart';
 import 'screens/product_details_screen.dart';
 import 'screens/cart_screen.dart';
@@ -17,19 +18,19 @@ import 'screens/orders_screen.dart';
 import 'screens/favorites_screen.dart';
 import 'screens/addresses_screen.dart';
 
-void main() async {
+void main() {
   WidgetsFlutterBinding.ensureInitialized();
-  final authService = AuthService();
-  final bool isLoggedIn = await authService.isLoggedIn();
-  
+
+  // O app sempre abre na vitrine (pública). O login só é exigido
+  // quando o usuário acessa uma funcionalidade restrita (AuthGuard).
   runApp(
     MultiProvider(
       providers: [
         ChangeNotifierProvider(create: (_) => Cart()),
         ChangeNotifierProvider(create: (_) => Favorites()),
       ],
-      child: PhoneFrameWrapper(
-        child: WinMarketplaceApp(initialRoute: isLoggedIn ? '/home' : '/login'),
+      child: const PhoneFrameWrapper(
+        child: WinMarketplaceApp(initialRoute: '/home'),
       ),
     ),
   );
@@ -183,7 +184,8 @@ class _HomePageState extends State<HomePage> {
           ],
         ),
         actions: [
-          _buildAppBarAction(Icons.favorite_border_rounded, () => Navigator.pushNamed(context, '/favorites')),
+          _buildAppBarAction(Icons.favorite_border_rounded,
+              () => AuthGuard.run(context, () => Navigator.pushNamed(context, '/favorites'))),
           Consumer<Cart>(
             builder: (_, cart, ch) => Badge(
               label: Text(cart.itemCount.toString()),
@@ -191,9 +193,11 @@ class _HomePageState extends State<HomePage> {
               backgroundColor: Colors.redAccent,
               child: ch,
             ),
-            child: _buildAppBarAction(Icons.shopping_cart_outlined, () => Navigator.pushNamed(context, '/cart')),
+            child: _buildAppBarAction(Icons.shopping_cart_outlined,
+                () => AuthGuard.run(context, () => Navigator.pushNamed(context, '/cart'))),
           ),
-          _buildAppBarAction(Icons.person_outline_rounded, () => Navigator.pushNamed(context, '/profile')),
+          _buildAppBarAction(Icons.person_outline_rounded,
+              () => AuthGuard.run(context, () => Navigator.pushNamed(context, '/profile'))),
           const SizedBox(width: 8),
         ],
       ),
@@ -366,7 +370,7 @@ class _HomePageState extends State<HomePage> {
                     top: 12, right: 12,
                     child: Consumer<Favorites>(
                       builder: (context, favs, _) => GestureDetector(
-                        onTap: () => favs.toggleFavorite(product),
+                        onTap: () => AuthGuard.run(context, () => favs.toggleFavorite(product)),
                         child: Container(padding: const EdgeInsets.all(6), decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle), child: Icon(favs.isFavorite(product.id) ? Icons.favorite_rounded : Icons.favorite_border_rounded, size: 16, color: favs.isFavorite(product.id) ? Colors.redAccent : Colors.black12)),
                       ),
                     ),
@@ -386,10 +390,10 @@ class _HomePageState extends State<HomePage> {
                     children: [
                       Text('R\$ ${product.preco.toStringAsFixed(2)}', style: const TextStyle(color: Color(0xFF007AFF), fontWeight: FontWeight.w900, fontSize: 17)),
                       GestureDetector(
-                        onTap: () {
+                        onTap: () => AuthGuard.run(context, () {
                           Provider.of<Cart>(context, listen: false).addItem(product, 1);
                           ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${product.nome} adicionado!'), duration: const Duration(seconds: 1)));
-                        },
+                        }),
                         child: Container(padding: const EdgeInsets.all(6), decoration: BoxDecoration(color: const Color(0xFF007AFF).withOpacity(0.08), borderRadius: BorderRadius.circular(8)), child: const Icon(Icons.add_shopping_cart_rounded, size: 16, color: Color(0xFF007AFF))),
                       ),
                     ],

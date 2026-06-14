@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../models/cart.dart';
+import '../models/favorites.dart';
 import '../services/auth_service.dart';
 
 class ProfileScreen extends StatefulWidget {
@@ -35,7 +38,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
   void _handleLogout() async {
     await _authService.logout();
     if (mounted) {
-      Navigator.of(context).pushNamedAndRemoveUntil('/login', (route) => false);
+      // Dados do usuário deslogado não devem permanecer em memória
+      Provider.of<Cart>(context, listen: false).clear();
+      Provider.of<Favorites>(context, listen: false).clear();
+      // Volta para a vitrine (pública); o login só reaparece via AuthGuard
+      Navigator.of(context).pushNamedAndRemoveUntil('/home', (route) => false);
     }
   }
 

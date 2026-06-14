@@ -77,9 +77,19 @@ class _LoginScreenState extends State<LoginScreen>
 
     if (!mounted) return;
     if (success) {
-      Navigator.of(context).pushReplacementNamed('/home');
+      _onAuthSuccess();
     } else {
       _showSnack('E-mail ou senha incorretos.', error: true);
+    }
+  }
+
+  /// Volta para a tela anterior (guard) ou para o menu principal.
+  void _onAuthSuccess() {
+    final navigator = Navigator.of(context);
+    if (navigator.canPop()) {
+      navigator.pop(true); // retorna ao ponto onde o usuário estava
+    } else {
+      navigator.pushReplacementNamed('/home');
     }
   }
 
@@ -131,7 +141,7 @@ class _LoginScreenState extends State<LoginScreen>
 
     if (!mounted) return;
     if (error == null) {
-      Navigator.of(context).pushReplacementNamed('/home');
+      _onAuthSuccess();
     } else {
       _showSnack(error, error: true);
     }
@@ -157,7 +167,20 @@ class _LoginScreenState extends State<LoginScreen>
           padding: const EdgeInsets.symmetric(horizontal: 24.0),
           child: Column(
             children: [
-              const SizedBox(height: 40),
+              // Botão de fechar quando a tela abre por cima da navegação
+              if (Navigator.of(context).canPop())
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: IconButton(
+                      icon: const Icon(Icons.close_rounded, color: Colors.black54),
+                      onPressed: () => Navigator.of(context).pop(false),
+                    ),
+                  ),
+                )
+              else
+                const SizedBox(height: 40),
               // Logo
               const Text(
                 'WIN',

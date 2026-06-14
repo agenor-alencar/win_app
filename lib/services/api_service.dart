@@ -230,6 +230,59 @@ class ApiService {
     throw Exception('Cupom inválido ou expirado');
   }
 
+  // ─── FRETE ───────────────────────────────────────────────────────────────────
+  /// Calcula o frete dinâmico (Uber Direct) — POST /fretes/calcular.
+  /// Exige usuário autenticado e um endereço já salvo (UUID).
+  /// Retorna o corpo do FreteResponseDTO; em erro de negócio o backend
+  /// devolve `sucesso: false` com `erro`/`codigoErro` (status 400), que
+  /// repassamos para a tela tratar — nunca inventamos um valor de frete.
+  Future<Map<String, dynamic>> calcularFrete({
+    required String lojistaId,
+    required String enderecoEntregaId,
+    double pesoTotalKg = 1.0,
+  }) async {
+    try {
+      final headers = await _getHeaders();
+      final response = await http.post(
+        Uri.parse('${AppConfig.baseUrl}/fretes/calcular'),
+        headers: headers,
+        body: jsonEncode({
+          'lojistaId': lojistaId,
+          'enderecoEntregaId': enderecoEntregaId,
+          'pesoTotalKg': pesoTotalKg,
+        }),
+      );
+      final decoded = json.decode(response.body);
+      if (decoded is Map<String, dynamic>) return decoded;
+      return {'sucesso': false, 'erro': 'Resposta inesperada do servidor.'};
+    } catch (_) {
+      return {
+        'sucesso': false,
+        'codigoErro': 'UBER_INDISPONIVEL',
+        'erro': 'Não foi possível calcular o frete agora. Tente novamente.',
+      };
+    }
+  }
+
+  /// Verifica se é a primeira compra do usuário (frete grátis) —
+  /// GET /pedidos/usuario/{id}/primeira-compra.
+  Future<bool> isFreteGratisPrimeiraCompra(String userId) async {
+    try {
+      final headers = await _getHeaders();
+      final response = await http.get(
+        Uri.parse('${AppConfig.baseUrl}/pedidos/usuario/$userId/primeira-compra'),
+        headers: headers,
+      );
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        return data['freteGratis'] == true;
+      }
+      return false;
+    } catch (_) {
+      return false;
+    }
+  }
+
   // ─── PEDIDOS ─────────────────────────────────────────────────────────────────
   Future<List<Order>> getUserOrders(String userId) async {
     try {
@@ -275,24 +328,60 @@ class ApiService {
   }
 
   // ─── PAGAMENTO ───────────────────────────────────────────────────────────────
-  Future<Map<String, dynamic>> generatePix(String pedidoId) async {
+  /// Gera o pagamento PIX (Pagar.me) para um pedido.
+  /// Os dois endpoints exigem os dados do cliente no corpo da requisição
+  /// ({nome, cpf, telefone, email}) — sem isso o backend devolve 400.
+  Future<Map<String, dynamic>> generatePix(
+    String pedidoId, {
+    required String nome,
+    required String email,
+    required String cpf,
+    required String telefone,
+  }) async {
     final headers = await _getHeaders();
+    final body = jsonEncode({
+      'nome': nome,
+      'email': email,
+      'cpf': cpf.replaceAll(RegExp(r'\D'), ''),
+      'telefone': telefone.replaceAll(RegExp(r'\D'), ''),
+    });
     // Tenta endpoint primário, depois fallback
     try {
       final r1 = await http.post(
           Uri.parse('${AppConfig.baseUrl}/pagamentos/pagarme/pix/$pedidoId'),
-          headers: headers);
+          headers: headers,
+          body: body);
       if (r1.statusCode == 200) return json.decode(r1.body);
 
       final r2 = await http.post(
           Uri.parse(
               '${AppConfig.baseUrl}/pagamentos/pedido/$pedidoId/pix/obter-ou-recriar'),
-          headers: headers);
+          headers: headers,
+          body: body);
       if (r2.statusCode == 200) return json.decode(r2.body);
 
-      throw Exception('Erro no servidor ao gerar PIX');
+      throw Exception('Erro no servidor ao gerar PIX (${r1.statusCode}/${r2.statusCode})');
     } catch (e) {
       throw Exception('Falha ao gerar o pagamento PIX: $e');
+    }
+  }
+
+  /// Consulta o status de um pagamento PIX — GET /pagamentos/{orderId}/status.
+  /// Retorna a string de status (ex.: "paid", "pending") ou null em erro.
+  Future<String?> checkPixStatus(String orderId) async {
+    try {
+      final headers = await _getHeaders();
+      final response = await http.get(
+        Uri.parse('${AppConfig.baseUrl}/pagamentos/$orderId/status'),
+        headers: headers,
+      );
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        return data['status']?.toString();
+      }
+      return null;
+    } catch (_) {
+      return null;
     }
   }
 }

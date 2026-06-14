@@ -4,6 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/cart.dart';
 import '../models/address.dart';
 import '../services/api_service.dart';
+import 'pix_payment_screen.dart';
 
 class CheckoutScreen extends StatefulWidget {
   const CheckoutScreen({super.key});
@@ -30,11 +31,16 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
 
   String? _userId;
   bool _isLoading = false;
-  double _freightValue = 15.00;
 
   List<Address> _savedAddresses = [];
   String? _selectedAddressId;
-  bool _saveAddress = false;
+
+  // ─── Frete dinâmico (Uber Direct via backend) ──────────────────────────────
+  // _freteValor nulo = ainda não calculado; nunca "chutamos" um valor.
+  double? _freteValor;
+  String? _freteErro;
+  bool _loadingFrete = false;
+  bool _freteGratisPrimeiraCompra = false;
 
   @override
   void initState() {
@@ -53,8 +59,13 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     });
     if (_userId != null && _userId!.isNotEmpty) {
       final addresses = await _apiService.getAddressesByUser(_userId!);
+      final freteGratis =
+          await _apiService.isFreteGratisPrimeiraCompra(_userId!);
       if (!mounted) return;
-      setState(() => _savedAddresses = addresses);
+      setState(() {
+        _savedAddresses = addresses;
+        _freteGratisPrimeiraCompra = freteGratis;
+      });
       // Pré-seleciona o endereço principal, se houver
       for (final addr in addresses) {
         if (addr.principal) {
@@ -76,6 +87,107 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
       _cidadeController.text = addr.cidade;
       _ufController.text = addr.estado;
     });
+    _calcularFrete();
+  }
+
+  /// Peso estimado: 0,5 kg por item, mínimo 1 kg (mesma regra da web).
+  double _pesoTotalKg(Cart cart) {
+    final peso = cart.items.values
+        .fold<double>(0, (t, item) => t + item.quantity * 0.5);
+    return peso < 1 ? 1 : peso;
+  }
+
+  /// Calcula o frete real para o endereço selecionado.
+  /// Exige endereço salvo (UUID) e produto com lojista identificado.
+  Future<void> _calcularFrete() async {
+    final cart = Provider.of<Cart>(context, listen: false);
+
+    if (_freteGratisPrimeiraCompra) {
+      setState(() {
+        _freteValor = 0;
+        _freteErro = null;
+      });
+      return;
+    }
+
+    if (_selectedAddressId == null || cart.items.isEmpty) return;
+
+    final lojistaId = cart.items.values.first.product.lojistaId;
+    if (lojistaId == null || lojistaId.isEmpty) {
+      setState(() {
+        _freteValor = null;
+        _freteErro = 'Produto sem loja identificada — não foi possível calcular o frete.';
+      });
+      return;
+    }
+
+    setState(() {
+      _loadingFrete = true;
+      _freteErro = null;
+    });
+
+    final resultado = await _apiService.calcularFrete(
+      lojistaId: lojistaId,
+      enderecoEntregaId: _selectedAddressId!,
+      pesoTotalKg: _pesoTotalKg(cart),
+    );
+
+    if (!mounted) return;
+    setState(() {
+      _loadingFrete = false;
+      if (resultado['sucesso'] == true && resultado['valorFreteTotal'] != null) {
+        _freteValor = (resultado['valorFreteTotal'] as num).toDouble();
+        _freteErro = null;
+      } else {
+        _freteValor = null;
+        _freteErro = resultado['erro']?.toString() ??
+            'Não foi possível calcular o frete para este endereço.';
+      }
+    });
+  }
+
+  /// Salva o endereço digitado, seleciona-o e calcula o frete.
+  /// (O cálculo de frete do backend exige um endereço salvo com UUID.)
+  Future<void> _salvarEnderecoECalcular() async {
+    if (_userId == null) return;
+    if (_cepController.text.isEmpty ||
+        _numeroController.text.isEmpty ||
+        _logradouroController.text.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Preencha o endereço para calcular o frete.')),
+      );
+      return;
+    }
+
+    setState(() => _loadingFrete = true);
+    final created = await _apiService.createAddress(
+      _userId!,
+      Address(
+        id: '',
+        logradouro: _logradouroController.text,
+        numero: _numeroController.text,
+        complemento: _complementoController.text,
+        bairro: _bairroController.text,
+        cidade: _cidadeController.text,
+        estado: _ufController.text,
+        cep: _cepController.text,
+      ),
+    );
+    if (!mounted) return;
+
+    if (created == null) {
+      setState(() {
+        _loadingFrete = false;
+        _freteErro = 'Não foi possível salvar o endereço.';
+      });
+      return;
+    }
+
+    setState(() {
+      _savedAddresses = [..._savedAddresses, created];
+      _selectedAddressId = created.id;
+    });
+    await _calcularFrete();
   }
 
   void _searchCep(String cep) async {
@@ -97,7 +209,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
 
   void _finishOrder() async {
     final cart = Provider.of<Cart>(context, listen: false);
-    
+
     if (_cepController.text.isEmpty || _numeroController.text.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Preencha os campos obrigatórios.')),
@@ -105,26 +217,25 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
       return;
     }
 
+    // Nunca finalizamos um pedido com frete indefinido ou com erro de cotação.
+    if (_freteErro != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(_freteErro!), backgroundColor: Colors.red),
+      );
+      return;
+    }
+    if (_freteValor == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Calcule o frete para este endereço antes de finalizar.')),
+      );
+      return;
+    }
+
+    final double frete = _freteGratisPrimeiraCompra ? 0 : _freteValor!;
+
     setState(() => _isLoading = true);
 
     try {
-      // Salva o endereço digitado na conta do usuário, se solicitado
-      if (_saveAddress && _selectedAddressId == null && _userId != null) {
-        await _apiService.createAddress(
-          _userId!,
-          Address(
-            id: '',
-            logradouro: _logradouroController.text,
-            numero: _numeroController.text,
-            complemento: _complementoController.text,
-            bairro: _bairroController.text,
-            cidade: _cidadeController.text,
-            estado: _ufController.text,
-            cep: _cepController.text,
-          ),
-        );
-      }
-
       // JSON AJUSTADO CONFORME O ERRO 400 DO SEU SPRING BOOT
       final orderData = {
         "usuarioId": _userId, // Adicionado aqui
@@ -142,16 +253,48 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
           "uf": _ufController.text,
           "complemento": _complementoController.text,
         },
+        "frete": double.parse(frete.toStringAsFixed(2)),
         "formaPagamento": "PIX"
       };
 
       final orderResponse = await _apiService.createOrder(orderData);
       final pedidoId = orderResponse['id'];
-      final pixResponse = await _apiService.generatePix(pedidoId);
-      
+      final pixResponse = await _apiService.generatePix(
+        pedidoId,
+        nome: _nomeController.text,
+        email: _emailController.text,
+        cpf: _cpfController.text,
+        telefone: _telefoneController.text,
+      );
+
+      // O backend devolve o QR Code aninhado em "billing" (billing.qrCode = copia e cola).
+      final billing = pixResponse['billing'] as Map<String, dynamic>?;
+      final copiaECola = billing?['qrCode']?.toString();
+      // amount vem em centavos; cai para o total local se ausente.
+      final amountCentavos = billing?['amount'];
+      final valorPago = amountCentavos is num
+          ? amountCentavos / 100.0
+          : cart.totalAmount + frete;
+      final billingId = billing?['billingId']?.toString();
+      // expiresAt vem como timestamp ISO do Pagar.me; a tela calcula o tempo restante.
+      final expiresAt = DateTime.tryParse(billing?['expiresAt']?.toString() ?? '');
+
+      if (copiaECola == null || copiaECola.isEmpty) {
+        throw Exception('O servidor não retornou o código PIX.');
+      }
+
       if (mounted) {
-        _showPixDialog(pixResponse['qr_code_base64'], pixResponse['copy_paste']);
         cart.clear();
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => PixPaymentScreen(
+              pixCode: copiaECola,
+              amount: valorPago,
+              billingId: billingId,
+              expiresAt: expiresAt,
+            ),
+          ),
+        );
       }
     } catch (e) {
       if (mounted) {
@@ -160,45 +303,6 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
         );
       }
     } finally { setState(() => _isLoading = false); }
-  }
-
-  void _showPixDialog(String? qrCode, String? copyPaste) {
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-        title: const Column(
-          children: [
-            Icon(Icons.pix, color: Color(0xFF32BCAD), size: 48),
-            SizedBox(height: 8),
-            Text('Pagamento PIX', style: TextStyle(fontWeight: FontWeight.w900)),
-          ],
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text('Copie o código abaixo para pagar no seu banco:', textAlign: TextAlign.center),
-            const SizedBox(height: 20),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(color: Colors.grey.shade100, borderRadius: BorderRadius.circular(12)),
-              child: SelectableText(
-                copyPaste ?? 'Código Pix indisponível',
-                textAlign: TextAlign.center,
-                style: const TextStyle(fontSize: 11, color: Colors.blue, fontWeight: FontWeight.bold),
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).popUntil((route) => route.isFirst),
-            child: const Text('VOLTAR PARA INÍCIO', style: TextStyle(fontWeight: FontWeight.bold)),
-          ),
-        ],
-      ),
-    );
   }
 
   @override
@@ -262,7 +366,12 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
               const SizedBox(height: 16),
             ],
             _buildTextField(_cepController, 'CEP', keyboardType: TextInputType.number, onChanged: (v) {
-              setState(() => _selectedAddressId = null);
+              // Endereço alterado manualmente: frete precisa ser recalculado.
+              setState(() {
+                _selectedAddressId = null;
+                _freteValor = null;
+                _freteErro = null;
+              });
               _searchCep(v);
             }),
             const SizedBox(height: 12),
@@ -285,17 +394,25 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                 Expanded(flex: 1, child: _buildTextField(_ufController, 'UF')),
               ],
             ),
-            if (_selectedAddressId == null)
-              CheckboxListTile(
-                value: _saveAddress,
-                onChanged: (v) => setState(() => _saveAddress = v ?? false),
-                contentPadding: EdgeInsets.zero,
-                controlAffinity: ListTileControlAffinity.leading,
-                title: const Text(
-                  'Salvar este endereço na minha conta',
-                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+            // Endereço digitado (não salvo): para calcular o frete o backend
+            // exige um endereço salvo, então salvamos e calculamos num passo só.
+            if (_selectedAddressId == null && !_freteGratisPrimeiraCompra) ...[
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: _loadingFrete ? null : _salvarEnderecoECalcular,
+                  icon: const Icon(Icons.local_shipping_outlined, size: 18),
+                  label: const Text('Salvar endereço e calcular frete'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: const Color(0xFF007AFF),
+                    side: const BorderSide(color: Color(0xFF007AFF)),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
                 ),
               ),
+            ],
 
             const SizedBox(height: 32),
             const Text('Resumo', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
@@ -307,9 +424,28 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                 children: [
                   _buildRow('Subtotal', 'R\$ ${cart.totalAmount.toStringAsFixed(2)}'),
                   const SizedBox(height: 12),
-                  _buildRow('Frete', 'R\$ ${_freightValue.toStringAsFixed(2)}'),
+                  _buildFreteRow(),
+                  if (_freteErro != null) ...[
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        const Icon(Icons.error_outline, color: Colors.red, size: 16),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(_freteErro!,
+                              style: const TextStyle(color: Colors.red, fontSize: 12)),
+                        ),
+                      ],
+                    ),
+                  ],
                   const Divider(height: 32),
-                  _buildRow('Total', 'R\$ ${(cart.totalAmount + _freightValue).toStringAsFixed(2)}', isTotal: true),
+                  _buildRow(
+                    'Total',
+                    _freteValor == null
+                        ? 'R\$ ${cart.totalAmount.toStringAsFixed(2)} + frete'
+                        : 'R\$ ${(cart.totalAmount + (_freteGratisPrimeiraCompra ? 0 : _freteValor!)).toStringAsFixed(2)}',
+                    isTotal: true,
+                  ),
                 ],
               ),
             ),
@@ -317,18 +453,26 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
             
             SizedBox(
               width: double.infinity, height: 56,
-              child: ElevatedButton(
-                onPressed: _isLoading ? null : _finishOrder,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF007AFF),
-                  foregroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                  elevation: 0,
-                ),
-                child: _isLoading 
-                  ? const CircularProgressIndicator(color: Colors.white)
-                  : const Text('FINALIZAR E PAGAR', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-              ),
+              child: Builder(builder: (context) {
+                final freteIndisponivel =
+                    !_freteGratisPrimeiraCompra && _freteValor == null;
+                final desabilitado = _isLoading || _loadingFrete || freteIndisponivel;
+                return ElevatedButton(
+                  onPressed: desabilitado ? null : _finishOrder,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF007AFF),
+                    foregroundColor: Colors.white,
+                    disabledBackgroundColor: Colors.grey.shade300,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                    elevation: 0,
+                  ),
+                  child: _isLoading
+                      ? const CircularProgressIndicator(color: Colors.white)
+                      : Text(
+                          freteIndisponivel ? 'CALCULE O FRETE' : 'FINALIZAR E PAGAR',
+                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                );
+              }),
             ),
           ],
         ),
@@ -346,6 +490,31 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
         border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.grey.shade200)),
         enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.grey.shade200)),
       ),
+    );
+  }
+
+  /// Linha de frete que reflete o estado: calculando / grátis / valor / pendente.
+  Widget _buildFreteRow() {
+    String valor;
+    Color cor = Colors.black;
+    if (_loadingFrete) {
+      valor = 'Calculando...';
+      cor = Colors.grey;
+    } else if (_freteGratisPrimeiraCompra) {
+      valor = 'Grátis 🎉';
+      cor = Colors.green;
+    } else if (_freteValor != null) {
+      valor = 'R\$ ${_freteValor!.toStringAsFixed(2)}';
+    } else {
+      valor = 'Selecione o endereço';
+      cor = Colors.grey;
+    }
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        const Text('Frete', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500)),
+        Text(valor, style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: cor)),
+      ],
     );
   }
 

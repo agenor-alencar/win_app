@@ -4,6 +4,7 @@ import '../models/product.dart';
 import '../models/cart.dart';
 import '../models/favorites.dart';
 import '../services/api_service.dart';
+import '../services/auth_guard.dart';
 
 class ProductDetailsScreen extends StatefulWidget {
   final String productId;
@@ -59,7 +60,7 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
                     favs.isFavorite(product.id) ? Icons.favorite_rounded : Icons.favorite_border_rounded,
                     color: favs.isFavorite(product.id) ? Colors.redAccent : Colors.black,
                   ),
-                  onPressed: () => favs.toggleFavorite(product),
+                  onPressed: () => AuthGuard.run(context, () => favs.toggleFavorite(product)),
                 ),
               );
             },
@@ -279,7 +280,7 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
       child: Row(
         children: [
           GestureDetector(
-            onTap: () {
+            onTap: () => AuthGuard.run(context, () {
               Provider.of<Cart>(context, listen: false).addItem(product, _quantity);
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(
@@ -290,7 +291,7 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
                   ),
                 ),
               );
-            },
+            }),
             child: Container(
               height: 54,
               width: 54,
@@ -304,10 +305,10 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
           const SizedBox(width: 12),
           Expanded(
             child: ElevatedButton(
-              onPressed: () {
+              onPressed: () => AuthGuard.run(context, () {
                 Provider.of<Cart>(context, listen: false).addItem(product, _quantity);
                 Navigator.pushNamed(context, '/cart');
-              },
+              }),
               style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFF007AFF),
                 foregroundColor: Colors.white,
