@@ -160,34 +160,34 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     }
 
     setState(() => _loadingFrete = true);
-    final created = await _apiService.createAddress(
-      _userId!,
-      Address(
-        id: '',
-        logradouro: _logradouroController.text,
-        numero: _numeroController.text,
-        complemento: _complementoController.text,
-        bairro: _bairroController.text,
-        cidade: _cidadeController.text,
-        estado: _ufController.text,
-        cep: _cepController.text,
-      ),
-    );
-    if (!mounted) return;
-
-    if (created == null) {
+    try {
+      // O backend valida: cep com exatamente 8 dígitos e estado em UF maiúscula.
+      final created = await _apiService.createAddress(
+        _userId!,
+        Address(
+          id: '',
+          logradouro: _logradouroController.text.trim(),
+          numero: _numeroController.text.trim(),
+          complemento: _complementoController.text.trim(),
+          bairro: _bairroController.text.trim(),
+          cidade: _cidadeController.text.trim(),
+          estado: _ufController.text.trim().toUpperCase(),
+          cep: _cepController.text.replaceAll(RegExp(r'\D'), ''),
+        ),
+      );
+      if (!mounted) return;
+      setState(() {
+        _savedAddresses = [..._savedAddresses, created];
+        _selectedAddressId = created.id;
+      });
+      await _calcularFrete();
+    } catch (e) {
+      if (!mounted) return;
       setState(() {
         _loadingFrete = false;
-        _freteErro = 'Não foi possível salvar o endereço.';
+        _freteErro = 'Erro ao salvar endereço: $e';
       });
-      return;
     }
-
-    setState(() {
-      _savedAddresses = [..._savedAddresses, created];
-      _selectedAddressId = created.id;
-    });
-    await _calcularFrete();
   }
 
   void _searchCep(String cep) async {
@@ -280,7 +280,14 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
       final expiresAt = DateTime.tryParse(billing?['expiresAt']?.toString() ?? '');
 
       if (copiaECola == null || copiaECola.isEmpty) {
-        throw Exception('O servidor não retornou o código PIX.');
+        // Surface o motivo real do servidor (ex.: CPF inválido, Pagar.me recusou)
+        // em vez de uma mensagem genérica, para facilitar o diagnóstico.
+        final motivo = pixResponse['message'] ??
+            pixResponse['error'] ??
+            billing?['message'] ??
+            billing?['status'] ??
+            pixResponse.toString();
+        throw Exception('PIX não gerado: $motivo');
       }
 
       if (mounted) {

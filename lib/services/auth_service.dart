@@ -10,6 +10,71 @@ class AuthService {
     await prefs.setString('jwt_token', token);
   }
 
+  /// Persiste o token de acesso, seu prazo de expiração e o cookie de refresh
+  /// devolvido pelo servidor (Set-Cookie: refresh_token=...).
+  Future<void> _persistSession(
+      SharedPreferences prefs, Map<String, dynamic> data, http.Response res) async {
+    final token = data['access_token'];
+    if (token != null) await prefs.setString('jwt_token', token);
+
+    final int expiresIn =
+        (data['expires_in'] is num) ? (data['expires_in'] as num).toInt() : 1800;
+    await prefs.setInt('token_expiry_ms',
+        DateTime.now().millisecondsSinceEpoch + expiresIn * 1000);
+
+    _saveRefreshCookie(prefs, res);
+  }
+
+  /// Extrai o valor do cookie refresh_token do cabeçalho Set-Cookie e o guarda.
+  /// (httpOnly só restringe JS de navegador; um cliente HTTP pode lê-lo.)
+  void _saveRefreshCookie(SharedPreferences prefs, http.Response res) {
+    final setCookie = res.headers['set-cookie'];
+    if (setCookie == null) return;
+    final match = RegExp(r'refresh_token=([^;]+)').firstMatch(setCookie);
+    if (match != null) {
+      prefs.setString('refresh_token', match.group(1)!);
+    }
+  }
+
+  /// Renova o access token usando o cookie de refresh — POST /auth/refresh.
+  /// Endpoint público (não exige token válido). Rotaciona o cookie a cada uso.
+  /// Retorna true se a sessão foi renovada.
+  Future<bool> refreshSession() async {
+    final prefs = await SharedPreferences.getInstance();
+    final cookie = prefs.getString('refresh_token');
+    if (cookie == null || cookie.isEmpty) return false;
+    try {
+      final res = await http.post(
+        Uri.parse('$baseUrl/auth/refresh'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Cookie': 'refresh_token=$cookie',
+        },
+      );
+      if (res.statusCode == 200) {
+        final data = json.decode(res.body);
+        if (data['access_token'] != null) {
+          await _persistSession(prefs, data, res);
+          return true;
+        }
+      }
+      return false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Renova o token se ele estiver expirado ou prestes a expirar (margem de 60s).
+  Future<void> ensureFreshToken() async {
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString('jwt_token');
+    final expiry = prefs.getInt('token_expiry_ms');
+    if (token == null || expiry == null) return;
+    if (DateTime.now().millisecondsSinceEpoch >= expiry - 60000) {
+      await refreshSession();
+    }
+  }
+
   Future<String?> getToken() async {
     final prefs = await SharedPreferences.getInstance();
     return prefs.getString('jwt_token');
@@ -34,10 +99,11 @@ class AuthService {
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         final token = data['access_token'];
-        
+
         if (token != null) {
           await saveToken(token);
-          
+          await _persistSession(await SharedPreferences.getInstance(), data, response);
+
           if (data['usuario'] != null) {
             final user = data['usuario'];
             final prefs = await SharedPreferences.getInstance();
@@ -90,6 +156,7 @@ class AuthService {
 
         if (token != null) {
           await saveToken(token);
+          await _persistSession(await SharedPreferences.getInstance(), data, response);
           if (data['usuario'] != null) {
             final user = data['usuario'];
             final prefs = await SharedPreferences.getInstance();

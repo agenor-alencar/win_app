@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import '../config/app_config.dart';
+import 'auth_service.dart';
 import '../models/product.dart';
 import '../models/category.dart';
 import '../models/order.dart';
@@ -11,6 +12,9 @@ import '../models/review.dart';
 class ApiService {
   // ─── AUTH HEADER ────────────────────────────────────────────────────────────
   Future<Map<String, String>> _getHeaders() async {
+    // Renova o token automaticamente se estiver expirado/perto de expirar,
+    // evitando 401 silenciosos no meio do fluxo (sessão expira em ~30 min).
+    await AuthService().ensureFreshToken();
     final prefs = await SharedPreferences.getInstance();
     final token = prefs.getString('jwt_token');
     return {
@@ -109,6 +113,35 @@ class ApiService {
     }
   }
 
+  /// Sugestões de produtos da MESMA loja — GET /produtos/lojista/{id}/sugestoes.
+  /// Exclui os produtos informados em [excluir]. Usado na tela de produto e de
+  /// pedido para incentivar a compra de mais itens do mesmo lojista.
+  Future<List<Product>> getSuggestionsByLojista(
+    String lojistaId, {
+    List<String> excluir = const [],
+    int limite = 6,
+  }) async {
+    if (lojistaId.isEmpty) return [];
+    try {
+      final headers = await _getHeaders();
+      final query = StringBuffer('?limite=$limite');
+      for (final id in excluir) {
+        if (id.isNotEmpty) query.write('&excluirIds=$id');
+      }
+      final response = await http.get(
+        Uri.parse('${AppConfig.baseUrl}/produtos/lojista/$lojistaId/sugestoes$query'),
+        headers: headers,
+      );
+      if (response.statusCode == 200) {
+        final List<dynamic> data = json.decode(response.body);
+        return data.map((item) => Product.fromJson(item)).toList();
+      }
+      return [];
+    } catch (_) {
+      return [];
+    }
+  }
+
   Future<Product> getProductById(String id) async {
     final headers = await _getHeaders();
     final response = await http.get(
@@ -158,22 +191,21 @@ class ApiService {
     }
   }
 
-  /// Cria um novo endereço para o usuário — POST /enderecos/usuario/{id}
-  Future<Address?> createAddress(String userId, Address address) async {
-    try {
-      final headers = await _getHeaders();
-      final response = await http.post(
-        Uri.parse('${AppConfig.baseUrl}/enderecos/usuario/$userId'),
-        headers: headers,
-        body: jsonEncode(address.toJson()),
-      );
-      if (response.statusCode == 200 || response.statusCode == 201) {
-        return Address.fromJson(json.decode(response.body));
-      }
-      return null;
-    } catch (_) {
-      return null;
+  /// Cria um novo endereço para o usuário — POST /enderecos/usuario/{id}.
+  /// Lança Exception com a mensagem real do servidor em caso de falha,
+  /// para que a tela possa exibir o motivo (validação, auth, etc.).
+  Future<Address> createAddress(String userId, Address address) async {
+    final headers = await _getHeaders();
+    final response = await http.post(
+      Uri.parse('${AppConfig.baseUrl}/enderecos/usuario/$userId'),
+      headers: headers,
+      body: jsonEncode(address.toJson()),
+    );
+    if (response.statusCode == 200 || response.statusCode == 201) {
+      return Address.fromJson(json.decode(response.body));
     }
+    throw Exception(
+        '(${response.statusCode}) ${_extractServerMessage(response.body)}');
   }
 
   /// Exclui um endereço do usuário — DELETE /enderecos/{id}
@@ -300,6 +332,44 @@ class ApiService {
     }
   }
 
+  /// Busca um pedido por id (com itens) — GET /pedidos/{id}.
+  Future<Order> getOrderById(String pedidoId) async {
+    final headers = await _getHeaders();
+    final response = await http.get(
+      Uri.parse('${AppConfig.baseUrl}/pedidos/$pedidoId'),
+      headers: headers,
+    );
+    if (response.statusCode == 200) {
+      return Order.fromJson(json.decode(response.body));
+    }
+    throw Exception('Erro ao carregar o pedido (${response.statusCode})');
+  }
+
+  /// Atualiza os itens de um pedido pendente — PUT /pedidos/{id}/itens.
+  /// Lança Exception com a mensagem do servidor em caso de falha.
+  Future<Order> updateOrderItems(String pedidoId, List<OrderItem> itens) async {
+    final headers = await _getHeaders();
+    final body = jsonEncode({
+      'itens': itens
+          .map((i) => {
+                'produtoId': i.produtoId,
+                'quantidade': i.quantidade,
+                'precoUnitario': i.precoUnitario,
+              })
+          .toList(),
+    });
+    final response = await http.put(
+      Uri.parse('${AppConfig.baseUrl}/pedidos/$pedidoId/itens'),
+      headers: headers,
+      body: body,
+    );
+    if (response.statusCode == 200) {
+      return Order.fromJson(json.decode(response.body));
+    }
+    throw Exception(
+        '(${response.statusCode}) ${_extractServerMessage(response.body)}');
+  }
+
   Future<Map<String, dynamic>> createOrder(
       Map<String, dynamic> orderData) async {
     final headers = await _getHeaders();
@@ -346,24 +416,34 @@ class ApiService {
       'telefone': telefone.replaceAll(RegExp(r'\D'), ''),
     });
     // Tenta endpoint primário, depois fallback
+    final r1 = await http.post(
+        Uri.parse('${AppConfig.baseUrl}/pagamentos/pagarme/pix/$pedidoId'),
+        headers: headers,
+        body: body);
+    if (r1.statusCode == 200) return json.decode(r1.body);
+
+    final r2 = await http.post(
+        Uri.parse(
+            '${AppConfig.baseUrl}/pagamentos/pedido/$pedidoId/pix/obter-ou-recriar'),
+        headers: headers,
+        body: body);
+    if (r2.statusCode == 200) return json.decode(r2.body);
+
+    // Ambos falharam: propaga a mensagem real do servidor para diagnóstico.
+    throw Exception(
+        'Falha ao gerar PIX (${r1.statusCode}/${r2.statusCode}): ${_extractServerMessage(r1.body)}');
+  }
+
+  /// Extrai uma mensagem amigável do corpo de erro JSON do backend.
+  String _extractServerMessage(String body) {
     try {
-      final r1 = await http.post(
-          Uri.parse('${AppConfig.baseUrl}/pagamentos/pagarme/pix/$pedidoId'),
-          headers: headers,
-          body: body);
-      if (r1.statusCode == 200) return json.decode(r1.body);
-
-      final r2 = await http.post(
-          Uri.parse(
-              '${AppConfig.baseUrl}/pagamentos/pedido/$pedidoId/pix/obter-ou-recriar'),
-          headers: headers,
-          body: body);
-      if (r2.statusCode == 200) return json.decode(r2.body);
-
-      throw Exception('Erro no servidor ao gerar PIX (${r1.statusCode}/${r2.statusCode})');
-    } catch (e) {
-      throw Exception('Falha ao gerar o pagamento PIX: $e');
-    }
+      final decoded = json.decode(body);
+      if (decoded is Map) {
+        return (decoded['message'] ?? decoded['erro'] ?? decoded['error'] ?? body)
+            .toString();
+      }
+    } catch (_) {}
+    return body;
   }
 
   /// Consulta o status de um pagamento PIX — GET /pagamentos/{orderId}/status.

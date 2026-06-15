@@ -28,10 +28,21 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
   }
 
   void _loadData() {
-    setState(() {
-      _productFuture = _apiService.getProductById(widget.productId);
-      _suggestionsFuture = _apiService.getProducts();
+    _suggestionsFuture = Future.value(<Product>[]);
+    _productFuture = _apiService.getProductById(widget.productId);
+    // Carrega sugestões da MESMA loja assim que souber o lojista do produto.
+    _productFuture.then((product) {
+      if (!mounted) return;
+      if (product.lojistaId != null && product.lojistaId!.isNotEmpty) {
+        setState(() {
+          _suggestionsFuture = _apiService.getSuggestionsByLojista(
+            product.lojistaId!,
+            excluir: [widget.productId],
+          );
+        });
+      }
     });
+    setState(() {});
   }
 
   @override
@@ -137,9 +148,7 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
                               style: TextStyle(color: Colors.grey.shade600, fontSize: 15, height: 1.6),
                             ),
                             const SizedBox(height: 40),
-                            const Text('Você também pode gostar', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
-                            const SizedBox(height: 16),
-                            _buildSuggestionsList(),
+                            _buildSuggestionsSection(),
                             const SizedBox(height: 40),
                           ],
                         ),
@@ -187,16 +196,38 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
     );
   }
 
-  Widget _buildSuggestionsList() {
-    return SizedBox(
-      height: 220,
-      child: FutureBuilder<List<Product>>(
-        future: _suggestionsFuture,
-        builder: (context, snapshot) {
-          if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
-          final products = snapshot.data!.where((p) => p.id != widget.productId).toList();
-          
-          return ListView.builder(
+  Widget _buildSuggestionsSection() {
+    return FutureBuilder<List<Product>>(
+      future: _suggestionsFuture,
+      builder: (context, snapshot) {
+        final products =
+            (snapshot.data ?? []).where((p) => p.id != widget.productId).toList();
+        // Esconde a seção inteira quando a loja não tem outros produtos.
+        if (snapshot.connectionState == ConnectionState.done && products.isEmpty) {
+          return const SizedBox.shrink();
+        }
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Mais produtos desta loja',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+            const SizedBox(height: 16),
+            SizedBox(
+              height: 220,
+              child: !snapshot.hasData
+                  ? const Center(child: CircularProgressIndicator())
+                  : _buildSuggestionsList(products),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildSuggestionsList(List<Product> products) {
+    return Builder(
+      builder: (context) {
+        return ListView.builder(
             scrollDirection: Axis.horizontal,
             physics: const BouncingScrollPhysics(),
             itemCount: products.length,
@@ -250,8 +281,7 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
             },
           );
         },
-      ),
-    );
+      );
   }
 
   Widget _buildQuantitySelector() {

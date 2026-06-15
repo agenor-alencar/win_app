@@ -336,16 +336,17 @@ class _AddressFormState extends State<_AddressForm> {
       principal: _principal,
     );
 
-    final created = await _apiService.createAddress(widget.userId, address);
-    if (!mounted) return;
-    setState(() => _isSaving = false);
-
-    if (created != null) {
+    try {
+      await _apiService.createAddress(widget.userId, address);
+      if (!mounted) return;
+      setState(() => _isSaving = false);
       Navigator.pop(context, true);
-    } else {
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _isSaving = false);
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Erro ao salvar o endereço. Tente novamente.'),
+        SnackBar(
+          content: Text('Erro ao salvar o endereço: $e'),
           backgroundColor: Colors.red,
         ),
       );
