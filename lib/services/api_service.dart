@@ -9,6 +9,7 @@ import '../models/order.dart';
 import '../models/address.dart';
 import '../models/review.dart';
 import '../models/coupon.dart';
+import '../models/app_notification.dart';
 
 class ApiService {
   // ─── AUTH HEADER ────────────────────────────────────────────────────────────
@@ -487,6 +488,84 @@ class ApiService {
       return null;
     } catch (_) {
       return null;
+    }
+  }
+
+  // ─── NOTIFICAÇÕES ────────────────────────────────────────────────────────────
+  /// Lista as notificações do usuário — GET /notificacao/list/usuario/{id}.
+  Future<List<AppNotification>> getNotifications(String userId) async {
+    try {
+      final headers = await _getHeaders();
+      final response = await http.get(
+        Uri.parse('${AppConfig.baseUrl}/notificacao/list/usuario/$userId'),
+        headers: headers,
+      );
+      if (response.statusCode == 200) {
+        final List<dynamic> data = json.decode(response.body);
+        return data.map((item) => AppNotification.fromJson(item)).toList();
+      }
+      return [];
+    } catch (_) {
+      return [];
+    }
+  }
+
+  /// Conta notificações não lidas — GET /notificacao/count-nao-lidas/usuario/{id}.
+  Future<int> getUnreadNotificationsCount(String userId) async {
+    try {
+      final headers = await _getHeaders();
+      final response = await http.get(
+        Uri.parse('${AppConfig.baseUrl}/notificacao/count-nao-lidas/usuario/$userId'),
+        headers: headers,
+      );
+      if (response.statusCode == 200) {
+        return int.tryParse(response.body.trim()) ?? 0;
+      }
+      return 0;
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  /// Marca uma notificação como lida — PATCH /notificacao/lida/{id}.
+  Future<bool> markNotificationRead(String id) async {
+    try {
+      final headers = await _getHeaders();
+      final response = await http.patch(
+        Uri.parse('${AppConfig.baseUrl}/notificacao/lida/$id'),
+        headers: headers,
+      );
+      return response.statusCode == 200;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Marca todas como lidas — PATCH /notificacao/todas-lidas/usuario/{id}.
+  Future<bool> markAllNotificationsRead(String userId) async {
+    try {
+      final headers = await _getHeaders();
+      final response = await http.patch(
+        Uri.parse('${AppConfig.baseUrl}/notificacao/todas-lidas/usuario/$userId'),
+        headers: headers,
+      );
+      return response.statusCode == 200;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Exclui uma notificação — DELETE /notificacao/delete/{id}.
+  Future<bool> deleteNotification(String id) async {
+    try {
+      final headers = await _getHeaders();
+      final response = await http.delete(
+        Uri.parse('${AppConfig.baseUrl}/notificacao/delete/$id'),
+        headers: headers,
+      );
+      return response.statusCode == 200 || response.statusCode == 204;
+    } catch (_) {
+      return false;
     }
   }
 }

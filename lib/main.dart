@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' hide Category;
 import 'package:provider/provider.dart';
 import 'package:device_frame/device_frame.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'models/product.dart';
 import 'models/category.dart';
 import 'models/cart.dart';
@@ -18,6 +19,7 @@ import 'screens/orders_screen.dart';
 import 'screens/favorites_screen.dart';
 import 'screens/addresses_screen.dart';
 import 'screens/my_coupons_screen.dart';
+import 'screens/notifications_screen.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -97,6 +99,7 @@ class WinMarketplaceApp extends StatelessWidget {
         '/favorites': (context) => const FavoritesScreen(),
         '/addresses': (context) => const AddressesScreen(),
         '/coupons': (context) => const MyCouponsScreen(),
+        '/notifications': (context) => const NotificationsScreen(),
       },
     );
   }
@@ -117,6 +120,7 @@ class _HomePageState extends State<HomePage> {
   late Future<List<Product>> _productsFuture;
   late Future<List<Category>> _categoriesFuture;
   bool _isSearching = false;
+  int _unreadNotifications = 0;
 
   @override
   void initState() {
@@ -126,6 +130,19 @@ class _HomePageState extends State<HomePage> {
       setState(() {});
     });
     _refreshData();
+    _loadUnreadNotifications();
+  }
+
+  /// Busca o número de notificações não lidas (apenas se logado).
+  Future<void> _loadUnreadNotifications() async {
+    final prefs = await SharedPreferences.getInstance();
+    final userId = prefs.getString('user_id');
+    if (userId == null || userId.isEmpty) {
+      if (mounted) setState(() => _unreadNotifications = 0);
+      return;
+    }
+    final count = await apiService.getUnreadNotificationsCount(userId);
+    if (mounted) setState(() => _unreadNotifications = count);
   }
 
   @override
@@ -186,6 +203,17 @@ class _HomePageState extends State<HomePage> {
           ],
         ),
         actions: [
+          Badge(
+            label: Text(_unreadNotifications.toString()),
+            isLabelVisible: _unreadNotifications > 0,
+            backgroundColor: Colors.redAccent,
+            child: _buildAppBarAction(Icons.notifications_none_rounded, () {
+              AuthGuard.run(context, () async {
+                await Navigator.pushNamed(context, '/notifications');
+                _loadUnreadNotifications(); // atualiza o badge ao voltar
+              });
+            }),
+          ),
           _buildAppBarAction(Icons.favorite_border_rounded,
               () => AuthGuard.run(context, () => Navigator.pushNamed(context, '/favorites'))),
           Consumer<Cart>(
