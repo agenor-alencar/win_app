@@ -1,7 +1,9 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/order.dart';
 import '../models/product.dart';
+import '../models/delivery.dart';
 import '../services/api_service.dart';
 import 'pix_payment_screen.dart';
 
@@ -27,10 +29,21 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
   bool _saving = false;
   bool _paying = false;
 
+  // Rastreamento da entrega (pedidos pagos/em andamento)
+  Delivery? _delivery;
+  bool _deliveryChecked = false;
+  Timer? _deliveryTimer;
+
   @override
   void initState() {
     super.initState();
     _load();
+  }
+
+  @override
+  void dispose() {
+    _deliveryTimer?.cancel();
+    super.dispose();
   }
 
   Future<void> _load() async {
@@ -51,7 +64,13 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
             .toList();
         _loading = false;
       });
-      _loadSuggestions();
+      if (_editable) {
+        _loadSuggestions();
+      } else {
+        // Pedido pago/em andamento: acompanha a entrega.
+        _loadDelivery();
+        _startDeliveryPolling();
+      }
     } catch (e) {
       if (!mounted) return;
       setState(() => _loading = false);
@@ -59,6 +78,34 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
         SnackBar(content: Text('Erro: $e'), backgroundColor: Colors.red),
       );
     }
+  }
+
+  Future<void> _loadDelivery() async {
+    final d = await _apiService.getDeliveryByOrder(widget.orderId);
+    if (!mounted) return;
+    setState(() {
+      _delivery = d;
+      _deliveryChecked = true;
+    });
+    if (d != null && d.finalizada) _deliveryTimer?.cancel();
+  }
+
+  void _startDeliveryPolling() {
+    _deliveryTimer?.cancel();
+    // Enquanto a entrega não estiver finalizada, atualiza a cada 15s.
+    _deliveryTimer = Timer.periodic(const Duration(seconds: 15), (t) async {
+      if (!mounted) {
+        t.cancel();
+        return;
+      }
+      final d = await _apiService.getDeliveryByOrder(widget.orderId);
+      if (!mounted) {
+        t.cancel();
+        return;
+      }
+      setState(() => _delivery = d);
+      if (d != null && d.finalizada) t.cancel();
+    });
   }
 
   void _loadSuggestions() {
@@ -258,6 +305,11 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
           ],
           const SizedBox(height: 20),
 
+          if (!_editable) ...[
+            _buildTracking(),
+            const SizedBox(height: 24),
+          ],
+
           const Text('Itens', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
           const SizedBox(height: 12),
           ..._itens.map(_buildItemTile),
@@ -282,6 +334,149 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
           const SizedBox(height: 24),
           _buildSummary(),
           const SizedBox(height: 16),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTracking() {
+    // Ainda buscando a entrega pela primeira vez.
+    if (!_deliveryChecked) {
+      return Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: Colors.grey.shade100),
+        ),
+        child: Row(
+          children: const [
+            SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)),
+            SizedBox(width: 12),
+            Text('Carregando entrega...', style: TextStyle(color: Colors.grey)),
+          ],
+        ),
+      );
+    }
+
+    // Pago, mas o lojista ainda não despachou a corrida.
+    if (_delivery == null) {
+      return Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: const Color(0xFFF1F7FF),
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.storefront_outlined, color: _blue),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                'Pagamento confirmado. O lojista está preparando seu pedido — a entrega será despachada em breve.',
+                style: TextStyle(color: Colors.grey.shade700, fontSize: 13, height: 1.3),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    final d = _delivery!;
+    final cancelada = d.statusEntrega == 'CANCELADA';
+    final entregue = d.statusEntrega == 'ENTREGUE';
+    final cor = cancelada ? Colors.red : (entregue ? Colors.green : _blue);
+
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: cor.withOpacity(0.35)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                entregue
+                    ? Icons.check_circle_rounded
+                    : (cancelada ? Icons.cancel_rounded : Icons.local_shipping_rounded),
+                color: cor,
+                size: 22,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(d.rotulo,
+                    style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15, color: cor)),
+              ),
+              if (!d.finalizada)
+                const SizedBox(
+                  width: 14, height: 14,
+                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.grey)),
+            ],
+          ),
+          const SizedBox(height: 14),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: LinearProgressIndicator(
+              value: d.progresso,
+              minHeight: 8,
+              backgroundColor: Colors.grey.shade200,
+              valueColor: AlwaysStoppedAnimation(cor),
+            ),
+          ),
+
+          // PIN de entrega — o cliente mostra ao entregador.
+          if (d.codigoEntrega != null && d.codigoEntrega!.isNotEmpty && !d.finalizada) ...[
+            const SizedBox(height: 18),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: _blue.withOpacity(0.06),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Column(
+                children: [
+                  Text('Código de entrega',
+                      style: TextStyle(color: Colors.grey.shade600, fontSize: 12, fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 4),
+                  Text(d.codigoEntrega!,
+                      style: const TextStyle(
+                          fontSize: 28, fontWeight: FontWeight.w900, letterSpacing: 6, color: _blue)),
+                  const SizedBox(height: 4),
+                  Text('Mostre este código ao entregador na chegada',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: Colors.grey.shade500, fontSize: 11)),
+                ],
+              ),
+            ),
+          ],
+
+          // Dados do entregador.
+          if (d.nomeMotorista != null && d.nomeMotorista!.isNotEmpty) ...[
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                const Icon(Icons.person_pin_circle_outlined, color: _blue, size: 22),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(d.nomeMotorista!,
+                          style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
+                      if (d.placaVeiculo != null && d.placaVeiculo!.isNotEmpty)
+                        Text('Placa ${d.placaVeiculo}',
+                            style: TextStyle(color: Colors.grey.shade600, fontSize: 12)),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ],
         ],
       ),
     );

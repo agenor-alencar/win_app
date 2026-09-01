@@ -10,6 +10,7 @@ import '../models/address.dart';
 import '../models/review.dart';
 import '../models/coupon.dart';
 import '../models/app_notification.dart';
+import '../models/delivery.dart';
 
 class ApiService {
   // ─── AUTH HEADER ────────────────────────────────────────────────────────────
@@ -484,6 +485,25 @@ class ApiService {
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         return data['status']?.toString();
+      }
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  // ─── ENTREGA (rastreamento) ──────────────────────────────────────────────────
+  /// Busca a entrega de um pedido — GET /entregas/pedido/{pedidoId}.
+  /// Retorna null se ainda não há entrega (lojista não despachou) ou em erro.
+  Future<Delivery?> getDeliveryByOrder(String pedidoId) async {
+    try {
+      final headers = await _getHeaders();
+      final response = await http.get(
+        Uri.parse('${AppConfig.baseUrl}/entregas/pedido/$pedidoId'),
+        headers: headers,
+      );
+      if (response.statusCode == 200) {
+        return Delivery.fromJson(json.decode(response.body));
       }
       return null;
     } catch (_) {
