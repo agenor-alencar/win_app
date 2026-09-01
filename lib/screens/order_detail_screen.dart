@@ -482,6 +482,8 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     );
   }
 
+  bool get _entregue => _order?.status == 'ENTREGUE';
+
   Widget _buildItemTile(OrderItem item) {
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -491,42 +493,184 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: Colors.grey.shade100),
       ),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          ClipRRect(
-            borderRadius: BorderRadius.circular(10),
-            child: Container(
-              width: 56,
-              height: 56,
-              color: const Color(0xFFF8F9FA),
-              child: item.produtoImagem != null && item.produtoImagem!.isNotEmpty
-                  ? Image.network(item.produtoImagem!, fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) =>
-                          const Icon(Icons.image_outlined, color: Colors.black12))
-                  : const Icon(Icons.image_outlined, color: Colors.black12),
-            ),
+          Row(
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(10),
+                child: Container(
+                  width: 56,
+                  height: 56,
+                  color: const Color(0xFFF8F9FA),
+                  child: item.produtoImagem != null && item.produtoImagem!.isNotEmpty
+                      ? Image.network(item.produtoImagem!, fit: BoxFit.cover,
+                          errorBuilder: (_, __, ___) =>
+                              const Icon(Icons.image_outlined, color: Colors.black12))
+                      : const Icon(Icons.image_outlined, color: Colors.black12),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(item.produtoNome,
+                        style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+                        maxLines: 2, overflow: TextOverflow.ellipsis),
+                    const SizedBox(height: 4),
+                    Text('R\$ ${item.precoUnitario.toStringAsFixed(2)}',
+                        style: const TextStyle(color: _blue, fontWeight: FontWeight.w800)),
+                  ],
+                ),
+              ),
+              if (_editable)
+                _buildQtyStepper(item)
+              else
+                Text('x${item.quantidade}',
+                    style: const TextStyle(fontWeight: FontWeight.w700)),
+            ],
           ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(item.produtoNome,
-                    style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
-                    maxLines: 2, overflow: TextOverflow.ellipsis),
-                const SizedBox(height: 4),
-                Text('R\$ ${item.precoUnitario.toStringAsFixed(2)}',
-                    style: const TextStyle(color: _blue, fontWeight: FontWeight.w800)),
-              ],
+          // Avaliar só é oferecido quando o pedido foi entregue.
+          if (_entregue) ...[
+            const SizedBox(height: 8),
+            Align(
+              alignment: Alignment.centerRight,
+              child: OutlinedButton.icon(
+                onPressed: () => _avaliarItem(item),
+                icon: const Icon(Icons.star_border_rounded, size: 18),
+                label: const Text('Avaliar'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.amber.shade800,
+                  side: BorderSide(color: Colors.amber.shade400),
+                  visualDensity: VisualDensity.compact,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                ),
+              ),
             ),
-          ),
-          if (_editable)
-            _buildQtyStepper(item)
-          else
-            Text('x${item.quantidade}',
-                style: const TextStyle(fontWeight: FontWeight.w700)),
+          ],
         ],
       ),
+    );
+  }
+
+  /// Formulário de avaliação de um item do pedido entregue.
+  Future<void> _avaliarItem(OrderItem item) async {
+    final prefs = await SharedPreferences.getInstance();
+    final userId = prefs.getString('user_id');
+    if (userId == null || userId.isEmpty || !mounted) return;
+
+    int nota = 5;
+    final comentarioCtrl = TextEditingController();
+    bool enviando = false;
+
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+      ),
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setSheet) {
+            return Padding(
+              padding: EdgeInsets.only(
+                left: 24, right: 24, top: 24,
+                bottom: MediaQuery.of(ctx).viewInsets.bottom + 24,
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Avaliar produto',
+                      style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900)),
+                  const SizedBox(height: 4),
+                  Text(item.produtoNome,
+                      style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
+                      maxLines: 1, overflow: TextOverflow.ellipsis),
+                  const SizedBox(height: 20),
+                  Center(
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: List.generate(5, (i) {
+                        final n = i + 1;
+                        return IconButton(
+                          onPressed: () => setSheet(() => nota = n),
+                          icon: Icon(
+                            n <= nota ? Icons.star_rounded : Icons.star_border_rounded,
+                            color: Colors.amber, size: 36,
+                          ),
+                        );
+                      }),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: comentarioCtrl,
+                    maxLines: 4,
+                    maxLength: 1000,
+                    decoration: InputDecoration(
+                      hintText: 'Conte como foi sua experiência (opcional)',
+                      filled: true,
+                      fillColor: const Color(0xFFFBFBFB),
+                      border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(color: Colors.grey.shade200)),
+                      enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(color: Colors.grey.shade200)),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  SizedBox(
+                    width: double.infinity,
+                    height: 52,
+                    child: ElevatedButton(
+                      onPressed: enviando
+                          ? null
+                          : () async {
+                              setSheet(() => enviando = true);
+                              try {
+                                await _apiService.createReview(
+                                  userId: userId,
+                                  produtoId: item.produtoId,
+                                  nota: nota,
+                                  comentario: comentarioCtrl.text.trim(),
+                                );
+                                if (!ctx.mounted) return;
+                                Navigator.pop(ctx);
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(content: Text('Avaliação enviada. Obrigado!')),
+                                );
+                              } catch (e) {
+                                setSheet(() => enviando = false);
+                                ScaffoldMessenger.of(ctx).showSnackBar(
+                                  SnackBar(content: Text('Erro: $e'), backgroundColor: Colors.red),
+                                );
+                              }
+                            },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: _blue,
+                        foregroundColor: Colors.white,
+                        elevation: 0,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                      ),
+                      child: enviando
+                          ? const SizedBox(
+                              width: 22, height: 22,
+                              child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                          : const Text('ENVIAR AVALIAÇÃO',
+                              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
     );
   }
 

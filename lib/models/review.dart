@@ -14,13 +14,17 @@ class Review {
   });
 
   factory Review.fromJson(Map<String, dynamic> json) {
+    // O backend aninha o usuário em { usuario: { nome } }.
+    final usuario = json['usuario'];
+    final nomeAninhado = usuario is Map ? usuario['nome'] : null;
     return Review(
       id: json['id']?.toString() ?? '',
       nota: (json['nota'] ?? json['avaliacao'] ?? 0).toDouble(),
       comentario: json['comentario'] ?? json['descricao'] ?? '',
-      usuarioNome: json['usuarioNome'] ?? json['nomeUsuario'] ?? 'Usuário',
+      usuarioNome:
+          nomeAninhado ?? json['usuarioNome'] ?? json['nomeUsuario'] ?? 'Usuário',
       createdAt: json['criadoEm'] != null
-          ? DateTime.tryParse(json['criadoEm'])
+          ? DateTime.tryParse('${json['criadoEm']}')
           : null,
     );
   }

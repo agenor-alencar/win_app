@@ -166,13 +166,39 @@ class ApiService {
         headers: headers,
       );
       if (response.statusCode == 200) {
-        final List<dynamic> data = json.decode(response.body);
-        return data.map((item) => Review.fromJson(item)).toList();
+        // O endpoint é paginado: {content: [...]}. Aceita também lista pura.
+        final decoded = json.decode(response.body);
+        final list = decoded is List
+            ? decoded
+            : (decoded is Map && decoded['content'] is List ? decoded['content'] : []);
+        return (list as List).map((item) => Review.fromJson(item)).toList();
       }
       return [];
     } catch (_) {
       return [];
     }
+  }
+
+  /// Cria uma avaliação de produto — POST /avaliacoes-produtos/usuario/{userId}.
+  /// Lança Exception com a mensagem do servidor em caso de falha.
+  Future<void> createReview({
+    required String userId,
+    required String produtoId,
+    required int nota,
+    required String comentario,
+  }) async {
+    final headers = await _getHeaders();
+    final response = await http.post(
+      Uri.parse('${AppConfig.baseUrl}/avaliacoes-produtos/usuario/$userId'),
+      headers: headers,
+      body: jsonEncode({
+        'produtoId': produtoId,
+        'nota': nota,
+        'comentario': comentario,
+      }),
+    );
+    if (response.statusCode == 200 || response.statusCode == 201) return;
+    throw Exception('(${response.statusCode}) ${_extractServerMessage(response.body)}');
   }
 
   // ─── ENDEREÇOS ───────────────────────────────────────────────────────────────

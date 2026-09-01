@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../models/product.dart';
 import '../models/cart.dart';
 import '../models/favorites.dart';
+import '../models/review.dart';
 import '../services/api_service.dart';
 import '../services/auth_guard.dart';
 
@@ -19,6 +20,7 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
   final ApiService _apiService = ApiService();
   late Future<Product> _productFuture;
   late Future<List<Product>> _suggestionsFuture;
+  late Future<List<Review>> _reviewsFuture;
   int _quantity = 1;
 
   @override
@@ -29,6 +31,7 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
 
   void _loadData() {
     _suggestionsFuture = Future.value(<Product>[]);
+    _reviewsFuture = _apiService.getProductReviews(widget.productId);
     _productFuture = _apiService.getProductById(widget.productId);
     // Carrega sugestões da MESMA loja assim que souber o lojista do produto.
     _productFuture.then((product) {
@@ -147,6 +150,8 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
                               product.descricao.isNotEmpty ? product.descricao : 'Este produto oferece a qualidade e confiança que você busca no Win Marketplace.',
                               style: TextStyle(color: Colors.grey.shade600, fontSize: 15, height: 1.6),
                             ),
+                            const SizedBox(height: 32),
+                            _buildReviewsSection(),
                             const SizedBox(height: 40),
                             _buildSuggestionsSection(),
                             const SizedBox(height: 40),
@@ -191,6 +196,84 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
             ),
           ),
           const Icon(Icons.arrow_forward_ios_rounded, size: 14, color: Colors.grey),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildReviewsSection() {
+    return FutureBuilder<List<Review>>(
+      future: _reviewsFuture,
+      builder: (context, snapshot) {
+        final reviews = snapshot.data ?? [];
+        final media = reviews.isEmpty
+            ? 0.0
+            : reviews.map((r) => r.nota).reduce((a, b) => a + b) / reviews.length;
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Avaliações',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+            const SizedBox(height: 8),
+            if (reviews.isNotEmpty) ...[
+              Row(
+                children: [
+                  const Icon(Icons.star_rounded, color: Colors.amber, size: 20),
+                  const SizedBox(width: 4),
+                  Text(media.toStringAsFixed(1),
+                      style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 16)),
+                  const SizedBox(width: 6),
+                  Text('(${reviews.length})',
+                      style: TextStyle(color: Colors.grey.shade500, fontSize: 13)),
+                ],
+              ),
+              const SizedBox(height: 12),
+              ...reviews.take(5).map(_buildReviewTile),
+            ] else
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text('Ainda não há avaliações. Seja o primeiro a avaliar!',
+                    style: TextStyle(color: Colors.grey.shade500, fontSize: 13)),
+              ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildReviewTile(Review r) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFBFBFB),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Colors.grey.shade100),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(r.usuarioNome,
+                    style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
+              ),
+              Row(
+                children: List.generate(5, (i) {
+                  return Icon(
+                    i < r.nota.round() ? Icons.star_rounded : Icons.star_border_rounded,
+                    color: Colors.amber, size: 15,
+                  );
+                }),
+              ),
+            ],
+          ),
+          if (r.comentario.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Text(r.comentario,
+                style: TextStyle(color: Colors.grey.shade700, fontSize: 13, height: 1.3)),
+          ],
         ],
       ),
     );
