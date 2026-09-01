@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/cart.dart';
 import '../models/address.dart';
+import '../models/coupon.dart';
 import '../services/api_service.dart';
 import 'pix_payment_screen.dart';
 
@@ -42,6 +43,17 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
   bool _loadingFrete = false;
   bool _freteGratisPrimeiraCompra = false;
 
+  // ─── Cupom ─────────────────────────────────────────────────────────────────
+  final _cupomController = TextEditingController();
+  List<Coupon> _myCoupons = [];
+  Coupon? _appliedCoupon;
+  String? _couponError;
+  bool _applyingCoupon = false;
+
+  /// Frete grátis por benefício (1ª compra ou cupom de frete grátis) — só preview.
+  bool get _freteGratis =>
+      _freteGratisPrimeiraCompra || (_appliedCoupon?.isFreteGratis ?? false);
+
   @override
   void initState() {
     super.initState();
@@ -61,10 +73,12 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
       final addresses = await _apiService.getAddressesByUser(_userId!);
       final freteGratis =
           await _apiService.isFreteGratisPrimeiraCompra(_userId!);
+      final cupons = await _apiService.getMyCoupons();
       if (!mounted) return;
       setState(() {
         _savedAddresses = addresses;
         _freteGratisPrimeiraCompra = freteGratis;
+        _myCoupons = cupons;
       });
       // Pré-seleciona o endereço principal, se houver
       for (final addr in addresses) {
@@ -207,6 +221,47 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     finally { setState(() => _isLoading = false); }
   }
 
+  /// Valida e aplica um cupom pelo código. O backend confirma a aplicação
+  /// (frete grátis) na criação do pedido; aqui só validamos e mostramos o preview.
+  Future<void> _aplicarCupom(String codigo) async {
+    final code = codigo.trim().toUpperCase();
+    if (code.isEmpty) return;
+    setState(() {
+      _applyingCoupon = true;
+      _couponError = null;
+    });
+    try {
+      final cupom = await _apiService.validateCouponTyped(code);
+      final cart = Provider.of<Cart>(context, listen: false);
+      if (cupom.valorMinimoPedido > 0 && cart.totalAmount < cupom.valorMinimoPedido) {
+        setState(() {
+          _applyingCoupon = false;
+          _couponError =
+              'Este cupom exige um pedido mínimo de R\$ ${cupom.valorMinimoPedido.toStringAsFixed(2)}.';
+        });
+        return;
+      }
+      setState(() {
+        _appliedCoupon = cupom;
+        _cupomController.text = cupom.codigo;
+        _applyingCoupon = false;
+      });
+    } catch (_) {
+      setState(() {
+        _applyingCoupon = false;
+        _couponError = 'Cupom inválido ou expirado.';
+      });
+    }
+  }
+
+  void _removerCupom() {
+    setState(() {
+      _appliedCoupon = null;
+      _couponError = null;
+      _cupomController.clear();
+    });
+  }
+
   void _finishOrder() async {
     final cart = Provider.of<Cart>(context, listen: false);
 
@@ -217,21 +272,24 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
       return;
     }
 
-    // Nunca finalizamos um pedido com frete indefinido ou com erro de cotação.
-    if (_freteErro != null) {
+    // Nunca finalizamos um pedido com frete indefinido ou com erro de cotação,
+    // exceto quando há frete grátis garantido (1ª compra ou cupom).
+    if (_freteErro != null && !_freteGratis) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(_freteErro!), backgroundColor: Colors.red),
       );
       return;
     }
-    if (_freteValor == null) {
+    if (!_freteGratis && _freteValor == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Calcule o frete para este endereço antes de finalizar.')),
       );
       return;
     }
 
-    final double frete = _freteGratisPrimeiraCompra ? 0 : _freteValor!;
+    // Com frete grátis, enviamos 0; senão o valor cotado. Se houver cupom, o
+    // backend revalida e aplica o benefício (rollback se o cupom for inválido).
+    final double frete = _freteGratis ? 0 : _freteValor!;
 
     setState(() => _isLoading = true);
 
@@ -254,6 +312,8 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
           "complemento": _complementoController.text,
         },
         "frete": double.parse(frete.toStringAsFixed(2)),
+        // Só o código vai no pedido; o backend valida e aplica (ex.: zera o frete).
+        if (_appliedCoupon != null) "cupomCodigo": _appliedCoupon!.codigo,
         "formaPagamento": "PIX"
       };
 
@@ -403,7 +463,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
             ),
             // Endereço digitado (não salvo): para calcular o frete o backend
             // exige um endereço salvo, então salvamos e calculamos num passo só.
-            if (_selectedAddressId == null && !_freteGratisPrimeiraCompra) ...[
+            if (_selectedAddressId == null && !_freteGratis) ...[
               const SizedBox(height: 12),
               SizedBox(
                 width: double.infinity,
@@ -420,6 +480,11 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                 ),
               ),
             ],
+
+            const SizedBox(height: 32),
+            const Text('Cupom', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+            const SizedBox(height: 12),
+            _buildCouponSection(),
 
             const SizedBox(height: 32),
             const Text('Resumo', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
@@ -445,12 +510,31 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                       ],
                     ),
                   ],
+                  if (_appliedCoupon != null) ...[
+                    const SizedBox(height: 12),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Row(
+                          children: [
+                            const Icon(Icons.local_offer_rounded, size: 14, color: Colors.green),
+                            const SizedBox(width: 6),
+                            Text('Cupom ${_appliedCoupon!.codigo}',
+                                style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500)),
+                          ],
+                        ),
+                        Text(_appliedCoupon!.beneficio,
+                            style: const TextStyle(
+                                fontSize: 14, fontWeight: FontWeight.w700, color: Colors.green)),
+                      ],
+                    ),
+                  ],
                   const Divider(height: 32),
                   _buildRow(
                     'Total',
-                    _freteValor == null
+                    (!_freteGratis && _freteValor == null)
                         ? 'R\$ ${cart.totalAmount.toStringAsFixed(2)} + frete'
-                        : 'R\$ ${(cart.totalAmount + (_freteGratisPrimeiraCompra ? 0 : _freteValor!)).toStringAsFixed(2)}',
+                        : 'R\$ ${(cart.totalAmount + (_freteGratis ? 0 : _freteValor!)).toStringAsFixed(2)}',
                     isTotal: true,
                   ),
                 ],
@@ -461,8 +545,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
             SizedBox(
               width: double.infinity, height: 56,
               child: Builder(builder: (context) {
-                final freteIndisponivel =
-                    !_freteGratisPrimeiraCompra && _freteValor == null;
+                final freteIndisponivel = !_freteGratis && _freteValor == null;
                 final desabilitado = _isLoading || _loadingFrete || freteIndisponivel;
                 return ElevatedButton(
                   onPressed: desabilitado ? null : _finishOrder,
@@ -504,10 +587,14 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
   Widget _buildFreteRow() {
     String valor;
     Color cor = Colors.black;
+    // Quando o frete original está cotado mas há benefício (cupom/1ª compra),
+    // mostramos o valor riscado + "Grátis".
+    final bool freteRiscado =
+        _freteGratis && !_freteGratisPrimeiraCompra && _freteValor != null;
     if (_loadingFrete) {
       valor = 'Calculando...';
       cor = Colors.grey;
-    } else if (_freteGratisPrimeiraCompra) {
+    } else if (_freteGratis) {
       valor = 'Grátis 🎉';
       cor = Colors.green;
     } else if (_freteValor != null) {
@@ -520,7 +607,113 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
         const Text('Frete', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500)),
-        Text(valor, style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: cor)),
+        Row(
+          children: [
+            if (freteRiscado) ...[
+              Text('R\$ ${_freteValor!.toStringAsFixed(2)}',
+                  style: const TextStyle(
+                      fontSize: 12,
+                      color: Colors.grey,
+                      decoration: TextDecoration.lineThrough)),
+              const SizedBox(width: 6),
+            ],
+            Text(valor,
+                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: cor)),
+          ],
+        ),
+      ],
+    );
+  }
+
+  /// Seção de cupom: campo + aplicar, chips dos "meus cupons" e estado aplicado.
+  Widget _buildCouponSection() {
+    if (_appliedCoupon != null) {
+      return Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Colors.green.withOpacity(0.06),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: Colors.green.withOpacity(0.4)),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.check_circle_rounded, color: Colors.green, size: 22),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Cupom ${_appliedCoupon!.codigo} aplicado',
+                      style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14)),
+                  Text(_appliedCoupon!.beneficio,
+                      style: const TextStyle(color: Colors.green, fontSize: 12, fontWeight: FontWeight.w600)),
+                ],
+              ),
+            ),
+            TextButton(
+              onPressed: _removerCupom,
+              child: const Text('Remover', style: TextStyle(color: Colors.redAccent)),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: _buildTextField(_cupomController, 'Código do cupom'),
+            ),
+            const SizedBox(width: 12),
+            SizedBox(
+              height: 56,
+              child: ElevatedButton(
+                onPressed: _applyingCoupon ? null : () => _aplicarCupom(_cupomController.text),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF007AFF),
+                  foregroundColor: Colors.white,
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+                child: _applyingCoupon
+                    ? const SizedBox(
+                        width: 18, height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                    : const Text('Aplicar', style: TextStyle(fontWeight: FontWeight.bold)),
+              ),
+            ),
+          ],
+        ),
+        if (_couponError != null) ...[
+          const SizedBox(height: 8),
+          Text(_couponError!, style: const TextStyle(color: Colors.red, fontSize: 12)),
+        ],
+        if (_myCoupons.isNotEmpty) ...[
+          const SizedBox(height: 12),
+          Text('Seus cupons',
+              style: TextStyle(color: Colors.grey.shade600, fontSize: 12, fontWeight: FontWeight.w600)),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: _myCoupons.map((c) {
+              return ActionChip(
+                avatar: const Icon(Icons.local_offer_outlined, size: 16, color: Color(0xFF007AFF)),
+                label: Text('${c.codigo} · ${c.beneficio}',
+                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                onPressed: () => _aplicarCupom(c.codigo),
+                backgroundColor: const Color(0xFF007AFF).withOpacity(0.06),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  side: BorderSide(color: const Color(0xFF007AFF).withOpacity(0.2)),
+                ),
+              );
+            }).toList(),
+          ),
+        ],
       ],
     );
   }

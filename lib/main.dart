@@ -17,6 +17,7 @@ import 'screens/profile_screen.dart';
 import 'screens/orders_screen.dart';
 import 'screens/favorites_screen.dart';
 import 'screens/addresses_screen.dart';
+import 'screens/my_coupons_screen.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -95,6 +96,7 @@ class WinMarketplaceApp extends StatelessWidget {
         '/orders': (context) => const OrdersScreen(),
         '/favorites': (context) => const FavoritesScreen(),
         '/addresses': (context) => const AddressesScreen(),
+        '/coupons': (context) => const MyCouponsScreen(),
       },
     );
   }

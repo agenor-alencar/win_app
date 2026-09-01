@@ -110,6 +110,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
               _buildMenuRow(Icons.location_on_outlined, 'Meus Endereços', () {
                 Navigator.pushNamed(context, '/addresses');
               }),
+              _buildMenuRow(Icons.local_offer_outlined, 'Meus Cupons', () {
+                Navigator.pushNamed(context, '/coupons');
+              }),
             ]),
 
             const SizedBox(height: 24),

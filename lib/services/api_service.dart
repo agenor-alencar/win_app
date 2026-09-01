@@ -8,6 +8,7 @@ import '../models/category.dart';
 import '../models/order.dart';
 import '../models/address.dart';
 import '../models/review.dart';
+import '../models/coupon.dart';
 
 class ApiService {
   // ─── AUTH HEADER ────────────────────────────────────────────────────────────
@@ -260,6 +261,30 @@ class ApiService {
     );
     if (response.statusCode == 200) return json.decode(response.body);
     throw Exception('Cupom inválido ou expirado');
+  }
+
+  /// Valida um cupom e o retorna tipado — GET /cupom/validar/{codigo}.
+  Future<Coupon> validateCouponTyped(String codigo) async {
+    final data = await validateCoupon(codigo);
+    return Coupon.fromJson(data);
+  }
+
+  /// Lista os cupons disponíveis do usuário — GET /cupom/meus.
+  Future<List<Coupon>> getMyCoupons() async {
+    try {
+      final headers = await _getHeaders();
+      final response = await http.get(
+        Uri.parse('${AppConfig.baseUrl}/cupom/meus'),
+        headers: headers,
+      );
+      if (response.statusCode == 200) {
+        final List<dynamic> data = json.decode(response.body);
+        return data.map((item) => Coupon.fromJson(item)).toList();
+      }
+      return [];
+    } catch (_) {
+      return [];
+    }
   }
 
   // ─── FRETE ───────────────────────────────────────────────────────────────────
