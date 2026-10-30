@@ -3,26 +3,35 @@ import 'package:flutter/foundation.dart' hide Category;
 import 'package:provider/provider.dart';
 import 'package:device_frame/device_frame.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'models/product.dart';
-import 'models/category.dart';
-import 'models/cart.dart';
-import 'models/favorites.dart';
-import 'services/api_service.dart';
-import 'services/auth_service.dart';
-import 'services/auth_guard.dart';
-import 'screens/login_screen.dart';
-import 'screens/product_details_screen.dart';
-import 'screens/cart_screen.dart';
-import 'screens/checkout_screen.dart';
-import 'screens/profile_screen.dart';
-import 'screens/orders_screen.dart';
-import 'screens/favorites_screen.dart';
-import 'screens/addresses_screen.dart';
-import 'screens/my_coupons_screen.dart';
-import 'screens/notifications_screen.dart';
+import 'package:win_app/features/catalogo/domain/product.dart';
+import 'package:win_app/features/catalogo/domain/category.dart';
+import 'package:win_app/features/carrinho/domain/cart.dart';
+import 'package:win_app/features/carrinho/domain/favorites.dart';
+import 'package:win_app/core/network/api_service.dart';
+import 'package:win_app/features/auth/data/auth_repository.dart';
+import 'package:win_app/features/auth/auth_guard.dart';
+import 'package:win_app/features/auth/presentation/login_screen.dart';
+import 'package:win_app/features/catalogo/presentation/product_details_screen.dart';
+import 'package:win_app/features/carrinho/presentation/cart_screen.dart';
+import 'package:win_app/features/checkout/presentation/checkout_screen.dart';
+import 'package:win_app/features/perfil/presentation/profile_screen.dart';
+import 'package:win_app/features/pedidos/presentation/orders_screen.dart';
+import 'package:win_app/features/carrinho/presentation/favorites_screen.dart';
+import 'package:win_app/features/enderecos/presentation/addresses_screen.dart';
+import 'package:win_app/features/perfil/presentation/my_coupons_screen.dart';
+import 'package:win_app/features/perfil/presentation/notifications_screen.dart';
+import 'package:win_app/features/auth/presentation/otp_login_screen.dart';
+import 'package:win_app/core/config/app_environment.dart';
+import 'package:win_app/core/theme/app_theme.dart';
 
-void main() {
+/// Entrypoint padrão (flavor vem do `--dart-define=FLAVOR`, default prod).
+/// Veja `main_dev.dart` / `main_prod.dart` para fixar o flavor.
+void main() => bootstrap();
+
+/// Inicialização compartilhada pelos entrypoints de flavor.
+void bootstrap({Flavor? flavor}) {
   WidgetsFlutterBinding.ensureInitialized();
+  if (flavor != null) AppEnvironment.applyFlavor(flavor);
 
   // O app sempre abre na vitrine (pública). O login só é exigido
   // quando o usuário acessa uma funcionalidade restrita (AuthGuard).
@@ -79,18 +88,13 @@ class WinMarketplaceApp extends StatelessWidget {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       title: 'Win Marketplace',
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF007AFF),
-          primary: const Color(0xFF007AFF),
-        ),
-        useMaterial3: true,
-        scaffoldBackgroundColor: const Color(0xFFFBFBFB),
-        fontFamily: 'Roboto',
-      ),
+      theme: AppTheme.light,
+      darkTheme: AppTheme.dark,
+      themeMode: ThemeMode.system,
       initialRoute: initialRoute,
       routes: {
         '/login': (context) => const LoginScreen(),
+        '/login-otp': (context) => const OtpLoginScreen(),
         '/home': (context) => const HomePage(),
         '/cart': (context) => const CartScreen(),
         '/checkout': (context) => const CheckoutScreen(),
@@ -114,7 +118,7 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   final ApiService apiService = ApiService();
-  final AuthService authService = AuthService();
+  final AuthRepository authService = AuthRepository();
   final TextEditingController _searchController = TextEditingController();
   
   late Future<List<Product>> _productsFuture;

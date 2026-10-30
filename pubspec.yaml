@@ -12,7 +12,12 @@ dependencies:
     sdk: flutter
 
   cupertino_icons: ^1.0.8
-  http: ^1.2.2
+  # Rede: dio com interceptors (Bearer automático, refresh no 401, retry, log só em debug).
+  dio: ^5.7.0
+  # Armazenamento seguro de token/refresh/PII (Keychain/Keystore) — substitui o
+  # shared_preferences para dados sensíveis.
+  flutter_secure_storage: ^9.2.2
+  # Preferências NÃO sensíveis (ex.: tema).
   shared_preferences: ^2.3.2
   provider: ^6.1.2
   device_frame: ^1.2.0
