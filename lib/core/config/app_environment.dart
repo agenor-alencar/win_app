@@ -8,15 +8,15 @@ enum Flavor { dev, prod }
 
 class AppEnvironment {
   final Flavor flavor;
-  final String apiBaseUrl;
+  final String baseUrl;
 
-  const AppEnvironment({required this.flavor, required this.apiBaseUrl});
+  const AppEnvironment({required this.flavor, required this.baseUrl});
 
   /// Dev: por padrão aponta para o backend local visto pelo emulador Android
   /// (`10.0.2.2` = localhost do host). Ajuste via `--dart-define` se precisar.
   static const AppEnvironment _dev = AppEnvironment(
     flavor: Flavor.dev,
-    apiBaseUrl: String.fromEnvironment(
+    baseUrl: String.fromEnvironment(
       'API_BASE_URL',
       defaultValue: 'http://10.0.2.2:8080/api/v1',
     ),
@@ -24,7 +24,7 @@ class AppEnvironment {
 
   static const AppEnvironment _prod = AppEnvironment(
     flavor: Flavor.prod,
-    apiBaseUrl: String.fromEnvironment(
+    baseUrl: String.fromEnvironment(
       'API_BASE_URL',
       defaultValue: 'https://www.winmarketplace.com.br/api/v1',
     ),
@@ -35,8 +35,8 @@ class AppEnvironment {
   /// Ambiente ativo.
   static AppEnvironment get current => _current;
 
-  /// Atalho para a base da API (fonte única).
-  static String get apiBaseUrl => _current.apiBaseUrl;
+  /// Atalho estático para a base da API (fonte única).
+  static String get apiBaseUrl => _current.baseUrl;
 
   /// Fixa o flavor em tempo de bootstrap (usado pelos entrypoints).
   static void applyFlavor(Flavor flavor) {
