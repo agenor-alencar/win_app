@@ -38,7 +38,7 @@ class ProductGridSection extends StatelessWidget {
         return SliverGrid(
           gridDelegate: _gridDelegate,
           delegate: SliverChildBuilderDelegate(
-            (_, __) => const _CardSkeleton(),
+            (_, _) => const _CardSkeleton(),
             childCount: 6,
           ),
         );

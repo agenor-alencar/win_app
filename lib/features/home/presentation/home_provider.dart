@@ -1,4 +1,4 @@
-import 'package:flutter/foundation.dart';
+import 'package:flutter/foundation.dart' hide Category;
 
 import 'package:win_app/features/catalogo/domain/category.dart';
 import 'package:win_app/features/catalogo/domain/product.dart';

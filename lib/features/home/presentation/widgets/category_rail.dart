@@ -48,7 +48,7 @@ class CategoryRail extends StatelessWidget {
             scrollDirection: Axis.horizontal,
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             itemCount: categories.length,
-            separatorBuilder: (_, __) => const SizedBox(width: 18),
+            separatorBuilder: (_, _) => const SizedBox(width: 18),
             itemBuilder: (context, i) => _CategoryItem(
               category: categories[i],
               onTap: onTap == null ? null : () => onTap!(categories[i]),
@@ -65,8 +65,8 @@ class CategoryRail extends StatelessWidget {
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         itemCount: 6,
-        separatorBuilder: (_, __) => const SizedBox(width: 18),
-        itemBuilder: (_, __) => Column(
+        separatorBuilder: (_, _) => const SizedBox(width: 18),
+        itemBuilder: (_, _) => Column(
           children: const [
             Skeleton(height: 56, width: 56, borderRadius: BorderRadius.all(Radius.circular(16))),
             SizedBox(height: 8),
