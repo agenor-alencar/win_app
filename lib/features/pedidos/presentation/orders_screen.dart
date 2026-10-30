@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:win_app/core/storage/secure_session_store.dart';
 import 'package:win_app/features/pedidos/domain/order.dart';
 import 'package:win_app/core/network/api_service.dart';
 import 'package:win_app/features/checkout/presentation/pix_payment_screen.dart';
@@ -24,8 +24,7 @@ class _OrdersScreenState extends State<OrdersScreen> {
   }
 
   Future<List<Order>> _loadOrders() async {
-    final prefs = await SharedPreferences.getInstance();
-    final userId = prefs.getString('user_id') ?? '';
+    final userId = await SecureSessionStore.instance.getUserId() ?? '';
     final orders = await _apiService.getUserOrders(userId);
     // Pedidos cancelados ficam ocultos para não poluir a lista do cliente.
     return orders.where((o) => o.status != 'CANCELADO').toList();
@@ -83,13 +82,13 @@ class _OrdersScreenState extends State<OrdersScreen> {
   Future<void> _pagarComPix(Order order) async {
     setState(() => _payingId = order.id);
     try {
-      final prefs = await SharedPreferences.getInstance();
+      final store = SecureSessionStore.instance;
       final pixResponse = await _apiService.generatePix(
         order.id,
-        nome: prefs.getString('user_nome') ?? '',
-        email: prefs.getString('user_email') ?? '',
-        cpf: prefs.getString('user_cpf') ?? '',
-        telefone: prefs.getString('user_telefone') ?? '',
+        nome: await store.getUserNome() ?? '',
+        email: await store.getUserEmail() ?? '',
+        cpf: await store.getUserCpf() ?? '',
+        telefone: await store.getUserTelefone() ?? '',
       );
 
       final billing = pixResponse['billing'] as Map<String, dynamic>?;

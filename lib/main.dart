@@ -2,7 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' hide Category;
 import 'package:provider/provider.dart';
 import 'package:device_frame/device_frame.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:win_app/core/app_navigator.dart';
+import 'package:win_app/core/storage/secure_session_store.dart';
 import 'package:win_app/features/catalogo/domain/product.dart';
 import 'package:win_app/features/catalogo/domain/category.dart';
 import 'package:win_app/features/carrinho/domain/cart.dart';
@@ -86,6 +87,7 @@ class WinMarketplaceApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      navigatorKey: rootNavigatorKey,
       debugShowCheckedModeBanner: false,
       title: 'Win Marketplace',
       theme: AppTheme.light,
@@ -139,8 +141,7 @@ class _HomePageState extends State<HomePage> {
 
   /// Busca o número de notificações não lidas (apenas se logado).
   Future<void> _loadUnreadNotifications() async {
-    final prefs = await SharedPreferences.getInstance();
-    final userId = prefs.getString('user_id');
+    final userId = await SecureSessionStore.instance.getUserId();
     if (userId == null || userId.isEmpty) {
       if (mounted) setState(() => _unreadNotifications = 0);
       return;

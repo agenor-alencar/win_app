@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:win_app/core/storage/secure_session_store.dart';
 import 'package:win_app/features/carrinho/domain/cart.dart';
 import 'package:win_app/features/carrinho/domain/favorites.dart';
 import 'package:win_app/features/auth/data/auth_repository.dart';
@@ -26,12 +26,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Future<void> _loadUserData() async {
-    final prefs = await SharedPreferences.getInstance();
+    final store = SecureSessionStore.instance;
+    final nome = await store.getUserNome() ?? 'Usuário WIN';
+    final email = await store.getUserEmail() ?? '';
+    final cpf = await store.getUserCpf() ?? '';
+    final telefone = await store.getUserTelefone() ?? '';
+    if (!mounted) return;
     setState(() {
-      _nome = prefs.getString('user_nome') ?? 'Usuário WIN';
-      _email = prefs.getString('user_email') ?? '';
-      _cpf = prefs.getString('user_cpf') ?? '';
-      _telefone = prefs.getString('user_telefone') ?? '';
+      _nome = nome;
+      _email = email;
+      _cpf = cpf;
+      _telefone = telefone;
     });
   }
 

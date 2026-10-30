@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:win_app/core/storage/secure_session_store.dart';
 import 'package:win_app/features/carrinho/domain/cart.dart';
 import 'package:win_app/features/enderecos/domain/address.dart';
 import 'package:win_app/features/checkout/domain/coupon.dart';
@@ -61,13 +61,19 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
   }
 
   Future<void> _loadUserData() async {
-    final prefs = await SharedPreferences.getInstance();
+    final store = SecureSessionStore.instance;
+    final userId = await store.getUserId();
+    final nome = await store.getUserNome() ?? '';
+    final email = await store.getUserEmail() ?? '';
+    final cpf = await store.getUserCpf() ?? '';
+    final telefone = await store.getUserTelefone() ?? '';
+    if (!mounted) return;
     setState(() {
-      _userId = prefs.getString('user_id');
-      _nomeController.text = prefs.getString('user_nome') ?? '';
-      _emailController.text = prefs.getString('user_email') ?? '';
-      _cpfController.text = prefs.getString('user_cpf') ?? '';
-      _telefoneController.text = prefs.getString('user_telefone') ?? '';
+      _userId = userId;
+      _nomeController.text = nome;
+      _emailController.text = email;
+      _cpfController.text = cpf;
+      _telefoneController.text = telefone;
     });
     if (_userId != null && _userId!.isNotEmpty) {
       final addresses = await _apiService.getAddressesByUser(_userId!);

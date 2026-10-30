@@ -1,5 +1,4 @@
 import 'package:dio/dio.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:win_app/core/network/api_client.dart';
 import 'package:win_app/core/network/api_exception.dart';
@@ -109,10 +108,7 @@ class AuthRepository {
 
   Future<void> logout() async {
     await _session.clear();
-    final prefs = await SharedPreferences.getInstance();
-    for (final k in ['user_id', 'user_nome', 'user_email', 'user_cpf', 'user_telefone']) {
-      await prefs.remove(k);
-    }
+    await clearLegacySessionPrefs();
   }
 }
 

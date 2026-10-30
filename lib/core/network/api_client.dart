@@ -2,12 +2,16 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:win_app/core/app_navigator.dart';
 import 'package:win_app/core/config/app_environment.dart';
 import 'package:win_app/core/storage/secure_session_store.dart';
 
 /// Cliente HTTP único do app (dio) com interceptors:
 /// - anexa `Authorization: Bearer <token>` automaticamente (exceto rotas de auth públicas);
 /// - no 401, tenta renovar a sessão via `/auth/refresh` (cookie) e refaz a chamada UMA vez;
+/// - se o refresh falhar DE VEZ (sem cookie, refresh 401, ou o retry ainda deu 401),
+///   encerra a sessão (secure storage + prefs legados) e roteia para o login — evita
+///   ficar "logado" com um token inválido;
 /// - loga apenas em debug e somente método/caminho/status (nunca token/PII).
 class ApiClient {
   ApiClient._() {
@@ -38,6 +42,7 @@ class ApiClient {
 
   final SecureSessionStore _session = SecureSessionStore.instance;
   bool _refreshing = false;
+  bool _handlingExpiry = false;
 
   static const _publicAuthPaths = [
     '/auth/login',
@@ -66,22 +71,34 @@ class ApiClient {
         },
         onError: (e, handler) async {
           final unauthorized = e.response?.statusCode == 401;
+          final hadAuth = e.requestOptions.headers.containsKey('Authorization');
           final alreadyRetried = e.requestOptions.extra['__retried'] == true;
           final isRefresh = e.requestOptions.path.contains('/auth/refresh');
-          if (unauthorized && !alreadyRetried && !isRefresh) {
-            final ok = await _tryRefresh();
-            if (ok) {
-              try {
-                final req = e.requestOptions;
-                req.extra['__retried'] = true;
-                final token = await _session.getToken();
-                if (token != null) req.headers['Authorization'] = 'Bearer $token';
-                final response = await _dio.fetch(req);
-                return handler.resolve(response);
-              } on DioException catch (err) {
-                return handler.next(err);
+
+          // Só tratamos 401 de requisições AUTENTICADAS (um 401 de login/otp é erro
+          // de credencial, não expiração de sessão).
+          if (unauthorized && hadAuth && !isRefresh) {
+            if (!alreadyRetried) {
+              final ok = await _tryRefresh();
+              if (ok) {
+                try {
+                  final req = e.requestOptions;
+                  req.extra['__retried'] = true;
+                  final token = await _session.getToken();
+                  if (token != null) req.headers['Authorization'] = 'Bearer $token';
+                  final response = await _dio.fetch(req);
+                  return handler.resolve(response);
+                } on DioException catch (err) {
+                  // Retry ainda deu erro: se foi 401 de novo, cai no encerramento abaixo.
+                  if (err.response?.statusCode == 401) {
+                    await _handleSessionExpired();
+                  }
+                  return handler.next(err);
+                }
               }
             }
+            // Refresh falhou de vez (sem cookie / refresh inválido / retry 401).
+            await _handleSessionExpired();
           }
           handler.next(e);
         },
@@ -115,11 +132,26 @@ class ApiClient {
       _refreshing = false;
     }
   }
+
+  /// Sessão expirada em definitivo: limpa segredos + perfil (secure storage) e
+  /// prefs legados, e manda o usuário para o login. Idempotente por ciclo.
+  Future<void> _handleSessionExpired() async {
+    if (_handlingExpiry) return;
+    _handlingExpiry = true;
+    try {
+      await _session.clear();
+      await clearLegacySessionPrefs();
+      final nav = rootNavigatorKey.currentState;
+      nav?.pushNamedAndRemoveUntil('/login-otp', (route) => false);
+    } finally {
+      _handlingExpiry = false;
+    }
+  }
 }
 
-/// Persiste access token, expiração, cookie de refresh e (se presente) os dados
-/// do usuário a partir de uma resposta de login/registro/OTP/refresh.
-/// Compartilhado pelo interceptor de refresh e pelo `AuthRepository`.
+/// Persiste access token, expiração, cookie de refresh e (se presente) o perfil
+/// do usuário — TUDO no armazenamento seguro. Compartilhado pelo interceptor de
+/// refresh e pelo `AuthRepository`.
 Future<void> persistSessionFromResponse(Response res) async {
   final session = SecureSessionStore.instance;
   final data = res.data;
@@ -133,7 +165,6 @@ Future<void> persistSessionFromResponse(Response res) async {
   final expiresIn = (data['expires_in'] is num) ? (data['expires_in'] as num).toInt() : 1800;
   await session.setTokenExpiryMs(DateTime.now().millisecondsSinceEpoch + expiresIn * 1000);
 
-  // Set-Cookie: refresh_token=...
   final setCookie = res.headers.map['set-cookie'];
   if (setCookie != null) {
     for (final c in setCookie) {
@@ -145,15 +176,22 @@ Future<void> persistSessionFromResponse(Response res) async {
     }
   }
 
-  // Dados NÃO sensíveis do usuário ficam em shared_preferences (lidos pelas telas:
-  // user_id/nome/email/cpf/telefone). Token/refresh ficam só no armazenamento seguro.
+  // Perfil (PII) agora no armazenamento seguro — não mais em shared_preferences.
   if (data['usuario'] is Map) {
-    final user = Map<String, dynamic>.from(data['usuario'] as Map);
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('user_id', (user['id'] ?? '').toString());
-    await prefs.setString('user_nome', (user['nome'] ?? '').toString());
-    await prefs.setString('user_email', (user['email'] ?? '').toString());
-    await prefs.setString('user_cpf', (user['cpf'] ?? '').toString());
-    await prefs.setString('user_telefone', (user['telefone'] ?? '').toString());
+    await session.saveUser(Map<String, dynamic>.from(data['usuario'] as Map));
   }
+}
+
+/// Remove valores legados de sessão/perfil que versões anteriores gravavam em
+/// `shared_preferences` em texto puro. Best-effort.
+Future<void> clearLegacySessionPrefs() async {
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    for (final k in [
+      'user_id', 'user_nome', 'user_email', 'user_cpf', 'user_telefone',
+      'jwt_token', 'refresh_token', 'token_expiry_ms',
+    ]) {
+      await prefs.remove(k);
+    }
+  } catch (_) {}
 }

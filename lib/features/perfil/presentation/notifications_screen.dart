@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:win_app/core/storage/secure_session_store.dart';
 import 'package:win_app/features/perfil/domain/app_notification.dart';
 import 'package:win_app/core/network/api_service.dart';
 
@@ -28,8 +28,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
 
   Future<void> _load() async {
     setState(() => _loading = true);
-    final prefs = await SharedPreferences.getInstance();
-    _userId = prefs.getString('user_id');
+    _userId = await SecureSessionStore.instance.getUserId();
     if (_userId == null || _userId!.isEmpty) {
       setState(() {
         _items = [];
