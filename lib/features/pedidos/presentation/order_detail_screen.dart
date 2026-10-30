@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:win_app/core/storage/secure_session_store.dart';
 import 'package:win_app/features/pedidos/domain/order.dart';
 import 'package:win_app/features/catalogo/domain/product.dart';
 import 'package:win_app/features/pedidos/domain/delivery.dart';
@@ -214,13 +214,13 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     }
     setState(() => _paying = true);
     try {
-      final prefs = await SharedPreferences.getInstance();
+      final store = SecureSessionStore.instance;
       final pixResponse = await _apiService.generatePix(
         widget.orderId,
-        nome: prefs.getString('user_nome') ?? '',
-        email: prefs.getString('user_email') ?? '',
-        cpf: prefs.getString('user_cpf') ?? '',
-        telefone: prefs.getString('user_telefone') ?? '',
+        nome: await store.getUserNome() ?? '',
+        email: await store.getUserEmail() ?? '',
+        cpf: await store.getUserCpf() ?? '',
+        telefone: await store.getUserTelefone() ?? '',
       );
       final billing = pixResponse['billing'] as Map<String, dynamic>?;
       final copiaECola = billing?['qrCode']?.toString();
@@ -557,8 +557,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
 
   /// Formulário de avaliação de um item do pedido entregue.
   Future<void> _avaliarItem(OrderItem item) async {
-    final prefs = await SharedPreferences.getInstance();
-    final userId = prefs.getString('user_id');
+    final userId = await SecureSessionStore.instance.getUserId();
     if (userId == null || userId.isEmpty || !mounted) return;
 
     int nota = 5;

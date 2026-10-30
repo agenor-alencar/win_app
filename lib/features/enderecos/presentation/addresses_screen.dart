@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:win_app/core/storage/secure_session_store.dart';
 import 'package:win_app/features/enderecos/domain/address.dart';
 import 'package:win_app/core/network/api_service.dart';
 
@@ -25,8 +25,7 @@ class _AddressesScreenState extends State<AddressesScreen> {
 
   Future<void> _loadAddresses() async {
     setState(() => _isLoading = true);
-    final prefs = await SharedPreferences.getInstance();
-    _userId = prefs.getString('user_id');
+    _userId = await SecureSessionStore.instance.getUserId();
     if (_userId == null || _userId!.isEmpty) {
       setState(() {
         _addresses = [];
